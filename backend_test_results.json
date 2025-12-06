@@ -1,0 +1,41 @@
+{
+  "summary": {
+    "total_tests": 5,
+    "passed_tests": 5,
+    "failed_tests": 0,
+    "success_rate": 100.0
+  },
+  "test_results": [
+    {
+      "test_name": "API Server Connectivity",
+      "success": true,
+      "details": "FastAPI docs accessible",
+      "timestamp": "2025-12-06T19:37:57.378084"
+    },
+    {
+      "test_name": "Admin Login - Send OTP",
+      "success": true,
+      "details": "Status: 200, Expected: 200",
+      "timestamp": "2025-12-06T19:37:58.304379"
+    },
+    {
+      "test_name": "Admin OTP Verification - Invalid OTP",
+      "success": true,
+      "details": "Status: 401, Expected: 401",
+      "timestamp": "2025-12-06T19:37:58.340131"
+    },
+    {
+      "test_name": "Get WFH Status - No Auth",
+      "success": true,
+      "details": "Status: 401, Expected: 401",
+      "timestamp": "2025-12-06T19:37:58.375071"
+    },
+    {
+      "test_name": "Access File - No Auth",
+      "success": true,
+      "details": "Status: 401, Expected: 401",
+      "timestamp": "2025-12-06T19:37:58.414002"
+    }
+  ],
+  "timestamp": "2025-12-06T19:37:58.415293"
+}
