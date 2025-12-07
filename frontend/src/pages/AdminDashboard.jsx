@@ -86,9 +86,32 @@ function AdminDashboard() {
 
   const handleWFHAction = async (empUsername, action) => {
     try {
+      let payload = { status: action };
+
+      // If approving, prompt admin to allocate access window (start and end)
+      if (action === 'approved') {
+        const startInput = window.prompt('Enter access start (YYYY-MM-DD HH:MM in 24h), e.g. 2025-12-07 09:00');
+        if (!startInput) {
+          toast.error('Approval cancelled: start time required');
+          return;
+        }
+        const endInput = window.prompt('Enter access end (YYYY-MM-DD HH:MM in 24h), e.g. 2025-12-07 17:00');
+        if (!endInput) {
+          toast.error('Approval cancelled: end time required');
+          return;
+        }
+
+        // Parse into ISO strings
+        const startIso = new Date(startInput.replace(' ', 'T')).toISOString();
+        const endIso = new Date(endInput.replace(' ', 'T')).toISOString();
+
+        payload.access_start = startIso;
+        payload.access_end = endIso;
+      }
+
       await axios.put(
         `${API}/admin/wfh-requests/${empUsername}`,
-        { status: action },
+        payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success(`Request ${action}`);

@@ -26,6 +26,12 @@ function EmployeeDashboard() {
     }
     loadData();
     getUserLocation();
+    getWiFiSSID();
+
+    // Refresh data every 10 seconds to detect WFH window changes dynamically
+    const interval = setInterval(loadData, 10000);
+    
+    return () => clearInterval(interval);
   }, [token]);
 
   const getUserLocation = () => {
@@ -44,6 +50,22 @@ function EmployeeDashboard() {
       );
     } else {
       toast.error('Geolocation not supported');
+    }
+  };
+
+  const getWiFiSSID = async () => {
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const response = await axios.get(`${API}/wifi-ssid`, { headers });
+      if (response.data.ssid) {
+        setWifiSSID(response.data.ssid);
+        toast.success(`WiFi detected: ${response.data.ssid}`);
+      } else {
+        toast.info('Could not detect WiFi. Please enter manually.');
+      }
+    } catch (error) {
+      logger.error('Failed to detect WiFi SSID');
+      // Silently fail - user can enter manually
     }
   };
 
@@ -105,7 +127,13 @@ function EmployeeDashboard() {
 
       toast.success('File downloaded successfully');
     } catch (error) {
-      const errorMsg = error.response?.data?.detail || 'Access denied';
+      const detail = error.response?.data?.detail;
+      let errorMsg = 'Access denied';
+      if (Array.isArray(detail)) {
+        errorMsg = detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+      } else if (typeof detail === 'string') {
+        errorMsg = detail;
+      }
       toast.error(errorMsg);
     }
   };
@@ -123,7 +151,14 @@ function EmployeeDashboard() {
       setShowWFHForm(false);
       loadData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to submit request');
+      const detail = error.response?.data?.detail;
+      let msg = 'Failed to submit request';
+      if (Array.isArray(detail)) {
+        msg = detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+      } else if (typeof detail === 'string') {
+        msg = detail;
+      }
+      toast.error(msg);
     }
   };
 
@@ -258,6 +293,61 @@ function EmployeeDashboard() {
                 Note: Browser cannot auto-detect WiFi SSID. Please enter manually.
               </p>
             </div>
+
+            {/* WFH Access Window Display */}
+            <div style={{ marginTop: '16px' }}>
+              <h4 style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 600 }}>WFH Access Window</h4>
+              {wfhStatus?.status === 'approved' ? (
+                (() => {
+                  const start = wfhStatus.access_start ? new Date(wfhStatus.access_start) : null;
+                  const end = wfhStatus.access_end ? new Date(wfhStatus.access_end) : null;
+                  const now = new Date();
+                  const within = start && end ? (now >= start && now <= end) : false;
+                  const expired = end ? (now > end) : false;
+
+                  return (
+                    <div style={{ color: within ? '#065f46' : '#6b7280' }}>
+                      <div style={{ fontSize: '14px' }}>
+                        <strong>Start:</strong> {start ? start.toLocaleString() : 'Not set'}
+                      </div>
+                      <div style={{ fontSize: '14px' }}>
+                        <strong>End:</strong> {end ? end.toLocaleString() : 'Not set'}
+                      </div>
+                      {wfhStatus.admin_comment && (
+                        <div style={{ fontSize: '14px', marginTop: '8px' }}>
+                          <strong>Admin Comment:</strong> {wfhStatus.admin_comment}
+                        </div>
+                      )}
+                      <div style={{ marginTop: '8px', fontWeight: 600 }}>
+                        {expired ? (
+                          <span style={{ color: '#b91c1c' }}>✗ Access window expired</span>
+                        ) : within ? (
+                          <span style={{ color: '#065f46' }}>✓ Within approved window</span>
+                        ) : (
+                          <span style={{ color: '#b91c1c' }}>✗ Outside approved window</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : wfhStatus?.status === 'pending' ? (
+                <div style={{ color: '#92400e' }}>Your WFH request is pending approval.</div>
+              ) : wfhStatus?.status === 'rejected' ? (
+                <div style={{ padding: '12px', background: '#fee2e2', borderRadius: '8px', color: '#991b1b' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px' }}>⚠️ Request Rejected</div>
+                  <div style={{ fontSize: '14px' }}>
+                    Your WFH request has been rejected by the admin.
+                  </div>
+                  {wfhStatus.admin_comment && (
+                    <div style={{ fontSize: '14px', marginTop: '8px' }}>
+                      <strong>Reason:</strong> {wfhStatus.admin_comment}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ color: '#6b7280' }}>No WFH approval found.</div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -266,50 +356,93 @@ function EmployeeDashboard() {
             <h2 className="section-title">Available Files</h2>
           </div>
 
-          {wfhStatus?.status === 'approved' && (
-            <div style={{ padding: '12px', background: '#d1fae5', borderRadius: '8px', marginBottom: '20px', color: '#065f46' }}>
-              <strong>✓ Work From Home Approved</strong> - You can access files without location/WiFi/time restrictions
-            </div>
-          )}
+          {(() => {
+            // Check if WFH is approved and within time window
+            const wfhApproved = wfhStatus?.status === 'approved';
+            const start = wfhApproved && wfhStatus.access_start ? new Date(wfhStatus.access_start) : null;
+            const end = wfhApproved && wfhStatus.access_end ? new Date(wfhStatus.access_end) : null;
+            const now = new Date();
+            const withinWindow = start && end ? (now >= start && now <= end) : false;
+            const expired = end ? (now > end) : false;
 
-          <div className="file-grid">
-            {files.map((file) => (
-              <div 
-                key={file.file_id} 
-                className="file-card"
-                onClick={() => handleFileAccess(file)}
-                data-testid={`file-card-${file.file_id}`}
-              >
-                <div className="file-icon">
-                  <FileText size={48} style={{ color: '#667eea' }} />
-                </div>
-                <div className="file-name">{file.filename}</div>
-                <div className="file-size">{(file.size / 1024).toFixed(2)} KB</div>
-                <div style={{ marginTop: '12px' }}>
-                  <span className="badge badge-success">Encrypted</span>
-                </div>
-                <button 
-                  className="primary-btn" 
-                  style={{ marginTop: '12px', width: '100%', padding: '8px' }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleFileAccess(file);
-                  }}
-                  data-testid={`download-file-${file.file_id}`}
-                >
-                  <Download size={14} style={{ display: 'inline', marginRight: '6px' }} />
-                  Access File
-                </button>
-              </div>
-            ))}
-          </div>
+            // Only show files if WFH is approved and within window
+            const canAccessFiles = wfhApproved && withinWindow;
 
-          {files.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
-              <FileText size={64} style={{ marginBottom: '16px', opacity: 0.5 }} />
-              <p>No files available</p>
-            </div>
-          )}
+            return (
+              <>
+                {wfhApproved && withinWindow && (
+                  <div style={{ padding: '12px', background: '#d1fae5', borderRadius: '8px', marginBottom: '20px', color: '#065f46' }}>
+                    <strong>✓ Work From Home Approved</strong> - You can access files without location/WiFi/time restrictions
+                  </div>
+                )}
+
+                {wfhApproved && expired && (
+                  <div style={{ padding: '12px', background: '#fee2e2', borderRadius: '8px', marginBottom: '20px', color: '#991b1b' }}>
+                    <strong>✗ Access Window Expired</strong> - Your WFH access period has ended. Files are not available.
+                  </div>
+                )}
+
+                {wfhApproved && !expired && !withinWindow && (
+                  <div style={{ padding: '12px', background: '#fef3c7', borderRadius: '8px', marginBottom: '20px', color: '#92400e' }}>
+                    <strong>⏳ Outside Access Window</strong> - You are outside your approved WFH time window. Files are not available.
+                  </div>
+                )}
+
+                {wfhStatus?.status === 'pending' && (
+                  <div style={{ padding: '12px', background: '#fef3c7', borderRadius: '8px', marginBottom: '20px', color: '#92400e' }}>
+                    <strong>⏳ WFH Pending</strong> - Your WFH request is pending approval. Files are not available.
+                  </div>
+                )}
+
+                {!wfhApproved && wfhStatus?.status !== 'pending' && (
+                  <div style={{ padding: '12px', background: '#fee2e2', borderRadius: '8px', marginBottom: '20px', color: '#991b1b' }}>
+                    <strong>✗ No WFH Approval</strong> - You must have an approved WFH request to access files.
+                  </div>
+                )}
+
+                {canAccessFiles ? (
+                  <div className="file-grid">
+                    {files.length > 0 ? (
+                      files.map((file) => (
+                        <div 
+                          key={file.file_id} 
+                          className="file-card"
+                          onClick={() => handleFileAccess(file)}
+                          data-testid={`file-card-${file.file_id}`}
+                        >
+                          <div className="file-icon">
+                            <FileText size={48} style={{ color: '#667eea' }} />
+                          </div>
+                          <div className="file-name">{file.filename}</div>
+                          <div className="file-size">{(file.size / 1024).toFixed(2)} KB</div>
+                          <div style={{ marginTop: '12px' }}>
+                            <span className="badge badge-success">Encrypted</span>
+                          </div>
+                          <button 
+                            className="primary-btn" 
+                            style={{ width: '100%', marginTop: '12px' }}
+                            data-testid={`download-btn-${file.file_id}`}
+                          >
+                            <Download size={16} style={{ display: 'inline', marginRight: '6px' }} />
+                            Download
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                        No files available
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+                    <FileText size={48} style={{ color: '#d1d5db', marginBottom: '16px' }} />
+                    <p>Files are only accessible with an active approved WFH request within the approved time window.</p>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>

@@ -66,6 +66,13 @@ class WFHRequest(BaseModel):
     status: str = "pending"  # pending, approved, rejected
     admin_comment: Optional[str] = None
     approved_at: Optional[datetime] = None
+    # When admin approves, they can allocate a specific access window
+    access_start: Optional[datetime] = None
+    access_end: Optional[datetime] = None
+
+
+class WFHRequestCreate(BaseModel):
+    reason: str
 
 class AccessRequest(BaseModel):
     latitude: float

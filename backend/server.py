@@ -15,13 +15,14 @@ from contextlib import asynccontextmanager
 from models import (
     UserRole, User, UserCreate, LoginRequest, OTPVerifyRequest,
     FileMetadata, AccessLog, WFHRequest, AccessRequest, GeofenceConfig,
-    EmployeeActivity
+    EmployeeActivity, WFHRequestCreate
 )
 from auth import hash_password, verify_password, create_access_token, verify_token, generate_otp
 from email_service import send_otp_email
 from crypto_service import CryptoService
 from geofence import GeofenceValidator
 from ml_service import AnomalyDetector
+from wifi_service import WiFiService
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -178,6 +179,16 @@ async def verify_otp(request: OTPVerifyRequest):
         "username": user["username"]
     }
 
+# WiFi Detection Routes
+@api_router.get("/wifi-ssid")
+async def get_wifi_ssid():
+    """
+    Detect and return the currently connected WiFi SSID.
+    Available to all authenticated users.
+    """
+    ssid = WiFiService.get_connected_ssid()
+    return {"ssid": ssid}
+
 # Admin Routes
 @api_router.post("/admin/employees")
 async def create_employee(employee: UserCreate, current_user: dict = Depends(get_current_user)):
@@ -272,14 +283,43 @@ async def update_wfh_request(employee_username: str, action: dict, current_user:
     
     status = action.get("status")  # approved or rejected
     comment = action.get("comment", "")
+    access_start = action.get("access_start")
+    access_end = action.get("access_end")
+
+    # Build update document
+    update_doc = {
+        "status": status,
+        "admin_comment": comment,
+        "approved_at": datetime.utcnow().isoformat()
+    }
+
+    # If admin provided access window, validate and store as ISO strings
+    if access_start:
+        try:
+            start_dt = datetime.fromisoformat(access_start.replace('Z', '+00:00'))
+            update_doc["access_start"] = start_dt.isoformat()
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail=f"Invalid access_start format: {access_start}. Use ISO 8601 format (e.g., 2025-12-07T09:00:00)")
     
+    if access_end:
+        try:
+            end_dt = datetime.fromisoformat(access_end.replace('Z', '+00:00'))
+            update_doc["access_end"] = end_dt.isoformat()
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail=f"Invalid access_end format: {access_end}. Use ISO 8601 format (e.g., 2025-12-07T17:00:00)")
+    
+    # If both provided, validate that end > start
+    if access_start and access_end:
+        try:
+            start_dt = datetime.fromisoformat(access_start.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(access_end.replace('Z', '+00:00'))
+            if end_dt <= start_dt:
+                raise HTTPException(status_code=400, detail="access_end must be after access_start")
+        except ValueError:
+            pass  # Already caught above
     result = await db.wfh_requests.update_one(
         {"employee_username": employee_username, "status": "pending"},
-        {"$set": {
-            "status": status,
-            "admin_comment": comment,
-            "approved_at": datetime.utcnow().isoformat()
-        }}
+        {"$set": update_doc}
     )
     
     if result.modified_count == 0:
@@ -389,22 +429,45 @@ async def access_file(request: AccessRequest, current_user: dict = Depends(get_c
         )
     
     # Employee access - check conditions
-    # Check if WFH approved
+    # Check if WFH approved and whether access window allows bypass
     wfh_request = await db.wfh_requests.find_one({
         "employee_username": current_user["username"],
         "status": "approved"
     })
-    wfh_approved = wfh_request is not None
-    
+
     # Get geofence config
     config = await db.geofence_config.find_one({}, {"_id": 0})
-    
-    # Validate access
-    validation_result = geofence_validator.validate_access(
-        request.model_dump(),
-        config,
-        wfh_approved
-    )
+
+    now = datetime.utcnow()
+    # Default validation result - not allowed until checks run
+    validation_result = {"allowed": False, "reason": "Access denied"}
+
+    if wfh_request:
+        # If admin approved, require an allocated access window
+        access_start = wfh_request.get("access_start")
+        access_end = wfh_request.get("access_end")
+
+        if access_start and access_end:
+            try:
+                start_dt = datetime.fromisoformat(access_start)
+                end_dt = datetime.fromisoformat(access_end)
+            except Exception:
+                validation_result = {"allowed": False, "reason": "Invalid access window format"}
+            else:
+                if start_dt <= now <= end_dt:
+                    # WFH approved and within admin-allocated window: bypass wifi/location checks
+                    validation_result = {"allowed": True, "reason": "WFH approved - time window active"}
+                else:
+                    validation_result = {"allowed": False, "reason": "Outside approved WFH access window"}
+        else:
+            validation_result = {"allowed": False, "reason": "WFH approved but access window not allocated by admin"}
+    else:
+        # No WFH approval - validate normally (must satisfy wifi, location, and time bounds)
+        validation_result = geofence_validator.validate_access(
+            request.model_dump(),
+            config,
+            False
+        )
     
     # Log access attempt
     log = {
@@ -446,7 +509,7 @@ async def access_file(request: AccessRequest, current_user: dict = Depends(get_c
 
 # WFH Request Routes
 @api_router.post("/wfh-request")
-async def create_wfh_request(request: WFHRequest, current_user: dict = Depends(get_current_user)):
+async def create_wfh_request(request: WFHRequestCreate, current_user: dict = Depends(get_current_user)):
     if current_user["role"] != UserRole.EMPLOYEE:
         raise HTTPException(status_code=403, detail="Employee access only")
     
@@ -475,9 +538,11 @@ async def get_wfh_status(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != UserRole.EMPLOYEE:
         raise HTTPException(status_code=403, detail="Employee access only")
     
+    # Get the latest (most recent) WFH request, sorted by requested_at descending
     request = await db.wfh_requests.find_one(
         {"employee_username": current_user["username"]},
-        {"_id": 0}
+        {"_id": 0},
+        sort=[("requested_at", -1)]
     )
     
     if not request:
@@ -485,9 +550,7 @@ async def get_wfh_status(current_user: dict = Depends(get_current_user)):
     
     return request
 
-# Include router
-app.include_router(api_router)
-
+# Add CORS middleware BEFORE including router - middleware order matters
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -495,6 +558,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include router after middleware setup
+app.include_router(api_router)
 
 logging.basicConfig(
     level=logging.INFO,
