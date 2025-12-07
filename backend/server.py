@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import io
 from typing import Optional, List
+from contextlib import asynccontextmanager
 
 from models import (
     UserRole, User, UserCreate, LoginRequest, OTPVerifyRequest,
@@ -27,17 +28,71 @@ load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-fs = motor.motor_asyncio.AsyncIOMotorGridFSBucket(db)
+client = None
+db = None
+fs = None
 
-# Initialize services
+# Initialize services (will be set during startup)
 crypto_service = CryptoService()
 geofence_validator = GeofenceValidator()
 anomaly_detector = AnomalyDetector()
 
-# Create the main app
-app = FastAPI(title="GeoCrypt API")
+# Initialize admin account and config
+async def init_admin():
+    try:
+        admin_exists = await db.users.find_one({"username": "admin"})
+        if not admin_exists:
+            admin_user = {
+                "email": "ananthakrishnan272004@gmail.com",
+                "username": "admin",
+                "password_hash": hash_password("admin"),
+                "role": UserRole.ADMIN,
+                "created_at": datetime.utcnow().isoformat(),
+                "is_active": True
+            }
+            await db.users.insert_one(admin_user)
+            logger.info("Admin user created")
+        
+        # Create default geofence config
+        config_exists = await db.geofence_config.find_one({})
+        if not config_exists:
+            default_config = {
+                "latitude": 10.8505,
+                "longitude": 76.2711,
+                "radius": 500,
+                "allowed_ssid": "OfficeWiFi",
+                "start_time": "09:00",
+                "end_time": "17:00"
+            }
+            await db.geofence_config.insert_one(default_config)
+            logger.info("Default geofence config created")
+    except Exception as e:
+        logger.error(f"Error initializing admin: {e}")
+
+# Lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global client, db, fs
+    logger.info("Starting up application...")
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[os.environ['DB_NAME']]
+    fs = motor.motor_asyncio.AsyncIOMotorGridFSBucket(db)
+    await init_admin()
+    logger.info("Application startup complete")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down application...")
+    if client:
+        client.close()
+    logger.info("Application shutdown complete")
+
+# Create the main app with lifespan
+app = FastAPI(title="GeoCrypt API", lifespan=lifespan)
+
+# Create API router
 api_router = APIRouter(prefix="/api")
 
 logger = logging.getLogger(__name__)
@@ -58,36 +113,6 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="User not found")
     
     return user
-
-# Initialize admin account on startup
-@app.on_event("startup")
-async def create_admin():
-    admin_exists = await db.users.find_one({"username": "admin"})
-    if not admin_exists:
-        admin_user = {
-            "email": "ananthakrishnan272004@gmail.com",
-            "username": "admin",
-            "password_hash": hash_password("admin"),
-            "role": UserRole.ADMIN,
-            "created_at": datetime.utcnow().isoformat(),
-            "is_active": True
-        }
-        await db.users.insert_one(admin_user)
-        logger.info("Admin user created")
-    
-    # Create default geofence config
-    config_exists = await db.geofence_config.find_one({})
-    if not config_exists:
-        default_config = {
-            "latitude": 10.8505,  # Example: Kerala, India
-            "longitude": 76.2711,
-            "radius": 500,  # 500 meters
-            "allowed_ssid": "OfficeWiFi",
-            "start_time": "09:00",
-            "end_time": "17:00"
-        }
-        await db.geofence_config.insert_one(default_config)
-        logger.info("Default geofence config created")
 
 # Auth Routes
 @api_router.post("/auth/login")
@@ -479,3 +504,7 @@ logging.basicConfig(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

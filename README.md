@@ -1,15 +1,30 @@
 # GeoCrypt - Geofencing Based Access Control System
 
-## Quick Start
+> Geolocation-based Access Control System with Encryption and Anomaly Detection
+
+## 🚀 Quick Start (LOCAL SETUP)
+
+**TL;DR**: Run this command to start everything:
+```bash
+python3 start-local.py
+```
+
+Then open: **http://localhost:3000**
 
 ### Default Admin Credentials
 - **Username:** `admin`
 - **Password:** `admin`
 - **Email:** `ananthakrishnan272004@gmail.com`
 
-### Access the Application
-- **Admin Login:** https://geocrypt-1.preview.emergentagent.com/admin/login
-- **Employee Login:** https://geocrypt-1.preview.emergentagent.com/employee/login
+### Service URLs (Local)
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Docs:** http://localhost:8000/docs
+- **Database:** mongodb://localhost:27017
+
+### Setup Guides
+- **Quick Start (3 steps):** See `QUICK_START.md` ⭐
+- **Comprehensive Guide:** See `LOCAL_SETUP.md`
 
 ## Features
 
