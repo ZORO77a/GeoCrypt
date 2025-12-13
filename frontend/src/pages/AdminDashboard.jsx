@@ -429,7 +429,16 @@ function AdminDashboard() {
                       <td>{log.filename || 'N/A'}</td>
                       <td>{log.action}</td>
                       <td>
-                        {log.location ? `${log.location.lat.toFixed(4)}, ${log.location.lon.toFixed(4)}` : 'N/A'}
+                        {(() => {
+                          const loc = log.location;
+                          if (!loc) return 'N/A';
+                          const lat = loc.lat;
+                          const lon = loc.lon;
+                          if (typeof lat === 'number' && typeof lon === 'number' && Number.isFinite(lat) && Number.isFinite(lon)) {
+                            return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                          }
+                          return 'N/A';
+                        })()}
                       </td>
                       <td>{log.wifi_ssid || 'N/A'}</td>
                       <td>

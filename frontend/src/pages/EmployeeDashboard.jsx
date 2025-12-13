@@ -60,7 +60,7 @@ function EmployeeDashboard() {
       const storedLoc = localStorage.getItem('lastKnownLocation');
       if (storedLoc) {
         const parsed = JSON.parse(storedLoc);
-        if (parsed && parsed.latitude && parsed.longitude) {
+        if (parsed && Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude)) {
           lastKnownLocationRef.current = parsed;
         }
       }
@@ -336,7 +336,7 @@ function EmployeeDashboard() {
 
       <div className="dashboard-content">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <div style={{ color: '#6b7280', fontSize: '13px' }}>
+          <div style={{ color: '#111827', fontSize: '13px', fontWeight: 600 }}>
             { (location || lastKnownLocationRef.current) || wifiSSID || lastKnownWifiRef.current ? (
               <>
                 Querying with:&nbsp;
@@ -458,10 +458,14 @@ function EmployeeDashboard() {
                 <MapPin size={16} style={{ display: 'inline', marginRight: '6px' }} />
                 Location
               </label>
-              <p style={{ color: '#6b7280', fontSize: '14px' }}>
-                {location || lastKnownLocationRef.current
-                  ? `Lat: ${(location || lastKnownLocationRef.current).latitude.toFixed(6)}, Lon: ${(location || lastKnownLocationRef.current).longitude.toFixed(6)}`
-                  : 'Location not detected'}
+              <p style={{ color: '#111827', fontSize: '14px' }}>
+                {(() => {
+                  const loc = location || lastKnownLocationRef.current;
+                  if (loc && Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude)) {
+                    return `Lat: ${loc.latitude.toFixed(6)}, Lon: ${loc.longitude.toFixed(6)}`;
+                  }
+                  return 'Location not detected';
+                })()}
               </p>
               {!location && (
                 <button onClick={getUserLocation} className="primary-btn" style={{ marginTop: '8px' }}>
@@ -469,7 +473,7 @@ function EmployeeDashboard() {
                 </button>
               )}
               {(!location && lastKnownLocationRef.current) && (
-                <div style={{ marginTop: '8px', color: '#6b7280', fontSize: '12px' }}>
+                <div style={{ marginTop: '8px', color: '#111827', fontSize: '12px' }}>
                   Using last known location from previous session
                 </div>
               )}
@@ -501,11 +505,11 @@ function EmployeeDashboard() {
               >
                 Detect WiFi
               </button>
-              <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
+              <p style={{ fontSize: '12px', color: '#111827', marginTop: '6px' }}>
                 Note: Your browser typically cannot auto-detect the WiFi SSID. Click "Detect WiFi" to attempt a system-level detection which may work in some environments.
               </p>
               {(!wifiSSID && lastKnownWifiRef.current) && (
-                <div style={{ marginTop: '6px', color: '#6b7280', fontSize: '12px' }}>
+                <div style={{ marginTop: '6px', color: '#111827', fontSize: '12px' }}>
                   Using last known WiFi: {lastKnownWifiRef.current}
                 </div>
               )}
