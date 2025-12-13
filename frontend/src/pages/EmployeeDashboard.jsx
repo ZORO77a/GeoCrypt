@@ -11,10 +11,11 @@ function EmployeeDashboard() {
   const [files, setFiles] = useState([]);
   const [wfhStatus, setWfhStatus] = useState(null);
   const [serverTime, setServerTime] = useState(null);
+  // Location state + persisted fallback
   const [location, setLocation] = useState(null);
-  const [manualLat, setManualLat] = useState('');
-  const [manualLon, setManualLon] = useState('');
+  const lastKnownLocationRef = useRef(null);
   const [wifiSSID, setWifiSSID] = useState('');
+  const lastKnownWifiRef = useRef(null);
   const [locationNotified, setLocationNotified] = useState(false);
   const [wifiNotified, setWifiNotified] = useState(false);
   const [lastWfhStatus, setLastWfhStatus] = useState(null);
@@ -53,6 +54,27 @@ function EmployeeDashboard() {
     return () => clearInterval(interval);
   }, [token]);
 
+  // Attempt to hydrate last-known location/wifi from localStorage on initial mount
+  useEffect(() => {
+    try {
+      const storedLoc = localStorage.getItem('lastKnownLocation');
+      if (storedLoc) {
+        const parsed = JSON.parse(storedLoc);
+        if (parsed && parsed.latitude && parsed.longitude) {
+          lastKnownLocationRef.current = parsed;
+        }
+      }
+      const storedWifi = localStorage.getItem('lastKnownWifi');
+      if (storedWifi) {
+        lastKnownWifiRef.current = storedWifi;
+        // If wifiSSID is empty (state not set), seed it from last-known value so UI shows it
+        if (!wifiSSID) setWifiSSID(storedWifi);
+      }
+    } catch (e) {
+      // ignore parsing errors
+    }
+  }, []);
+
   // Keep the file list updated when geo/wifi changes but avoid re-running getUserLocation/getWiFiSSID
   useEffect(() => {
     if (!token) return;
@@ -68,6 +90,8 @@ function EmployeeDashboard() {
             longitude: position.coords.longitude
           };
           setLocation(newLocation);
+          lastKnownLocationRef.current = newLocation;
+          try { localStorage.setItem('lastKnownLocation', JSON.stringify(newLocation)); } catch (e) { /* ignore */ }
           if (!locationNotified) {
             toast.success('Location detected');
             setLocationNotified(true);
@@ -91,6 +115,8 @@ function EmployeeDashboard() {
       const response = await axios.get(`${API}/wifi-ssid`, { headers });
       if (response.data.ssid) {
         setWifiSSID(response.data.ssid);
+        lastKnownWifiRef.current = response.data.ssid;
+        try { localStorage.setItem('lastKnownWifi', response.data.ssid); } catch (e) { /* ignore */ }
         if (!wifiNotified) {
           toast.success(`WiFi detected: ${response.data.ssid}`);
           setWifiNotified(true);
@@ -111,12 +137,14 @@ function EmployeeDashboard() {
     try {
       const headers = { Authorization: `Bearer ${token}` };
       const params = {};
-      if (location) {
-        params.latitude = location.latitude;
-        params.longitude = location.longitude;
+      const locToUse = location || lastKnownLocationRef.current;
+      const wifiToUse = wifiSSID || lastKnownWifiRef.current;
+      if (locToUse) {
+        params.latitude = locToUse.latitude;
+        params.longitude = locToUse.longitude;
       }
-      if (wifiSSID) {
-        params.wifi_ssid = wifiSSID;
+      if (wifiToUse) {
+        params.wifi_ssid = wifiToUse;
       }
 
       console.debug('Loading files with params:', params);
@@ -170,7 +198,9 @@ function EmployeeDashboard() {
   };
 
   const handleFileAccess = async (file) => {
-    if (!location) {
+    const locToUse = location || lastKnownLocationRef.current;
+    const wifiToUse = wifiSSID || lastKnownWifiRef.current;
+    if (!locToUse) {
       toast.error('Location not detected. Please enable location access.');
       return;
     }
@@ -183,17 +213,17 @@ function EmployeeDashboard() {
     try {
       console.debug('Attempting file access POST payload:', {
         file_id: file.file_id,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        wifi_ssid: wifiSSID
+        latitude: locToUse.latitude,
+        longitude: locToUse.longitude,
+        wifi_ssid: wifiToUse
       });
       const response = await axios.post(
         `${API}/files/access`,
         {
           file_id: file.file_id,
-          latitude: location.latitude,
-          longitude: location.longitude,
-          wifi_ssid: wifiSSID
+          latitude: locToUse.latitude,
+          longitude: locToUse.longitude,
+          wifi_ssid: wifiToUse
         },
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -286,12 +316,12 @@ function EmployeeDashboard() {
       <div className="dashboard-content">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <div style={{ color: '#6b7280', fontSize: '13px' }}>
-            {location || wifiSSID ? (
+            { (location || lastKnownLocationRef.current) || wifiSSID || lastKnownWifiRef.current ? (
               <>
                 Querying with:&nbsp;
-                {location ? `Lat: ${location.latitude.toFixed(5)}, Lon: ${location.longitude.toFixed(5)}` : ''}
+                { (location || lastKnownLocationRef.current) ? `Lat: ${(location || lastKnownLocationRef.current).latitude.toFixed(5)}, Lon: ${(location || lastKnownLocationRef.current).longitude.toFixed(5)}` : ''}
                 {location && wifiSSID ? ' | ' : ''}
-                {wifiSSID ? `WiFi: ${wifiSSID}` : ''}
+                {(wifiSSID || lastKnownWifiRef.current) ? `WiFi: ${wifiSSID || lastKnownWifiRef.current}` : ''}
               </>
             ) : (
               'Querying with: No location or WiFi selected'
@@ -390,8 +420,8 @@ function EmployeeDashboard() {
                 Location
               </label>
               <p style={{ color: '#6b7280', fontSize: '14px' }}>
-                {location 
-                  ? `Lat: ${location.latitude.toFixed(6)}, Lon: ${location.longitude.toFixed(6)}`
+                {location || lastKnownLocationRef.current
+                  ? `Lat: ${(location || lastKnownLocationRef.current).latitude.toFixed(6)}, Lon: ${(location || lastKnownLocationRef.current).longitude.toFixed(6)}`
                   : 'Location not detected'}
               </p>
               {!location && (
@@ -399,21 +429,12 @@ function EmployeeDashboard() {
                   Detect Location
                 </button>
               )}
-              <div style={{ marginTop: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '6px' }}>Or enter location manually:</label>
-                <input type="text" className="form-input" placeholder="Latitude" value={manualLat} onChange={(e) => setManualLat(e.target.value)} style={{ width: '160px', display: 'inline-block', marginRight: '8px' }} />
-                <input type="text" className="form-input" placeholder="Longitude" value={manualLon} onChange={(e) => setManualLon(e.target.value)} style={{ width: '160px', display: 'inline-block' }} />
-                <button onClick={() => {
-                  if (manualLat && manualLon) {
-                    setLocation({ latitude: parseFloat(manualLat), longitude: parseFloat(manualLon) });
-                    toast.success('Manual location set');
-                  } else {
-                    toast.error('Please enter both latitude and longitude');
-                  }
-                }} className="primary-btn" style={{ marginLeft: '8px' }}>
-                  Set Location
-                </button>
-              </div>
+              {(!location && lastKnownLocationRef.current) && (
+                <div style={{ marginTop: '8px', color: '#6b7280', fontSize: '12px' }}>
+                  Using last known location from previous session
+                </div>
+              )}
+              {/* Manual location entry removed per user preference; auto-detected location is used and persisted */}
             </div>
 
             <div className="form-group">
@@ -426,7 +447,11 @@ function EmployeeDashboard() {
                 className="form-input"
                 placeholder="Enter WiFi SSID (e.g., OfficeWiFi)"
                 value={wifiSSID}
-                onChange={(e) => setWifiSSID(e.target.value)}
+                onChange={(e) => {
+                  setWifiSSID(e.target.value);
+                  lastKnownWifiRef.current = e.target.value;
+                  try { localStorage.setItem('lastKnownWifi', e.target.value); } catch (err) { }
+                }}
                 data-testid="wifi-ssid-input"
               />
               <button
@@ -438,8 +463,13 @@ function EmployeeDashboard() {
                 Detect WiFi
               </button>
               <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
-                Note: Browser cannot auto-detect WiFi SSID. Please enter manually.
+                Note: Your browser typically cannot auto-detect the WiFi SSID. Click "Detect WiFi" to attempt a system-level detection which may work in some environments.
               </p>
+              {(!wifiSSID && lastKnownWifiRef.current) && (
+                <div style={{ marginTop: '6px', color: '#6b7280', fontSize: '12px' }}>
+                  Using last known WiFi: {lastKnownWifiRef.current}
+                </div>
+              )}
             </div>
 
             {/* WFH Access Window Display */}
@@ -601,8 +631,10 @@ function EmployeeDashboard() {
                               try {
                                 const headers = { Authorization: `Bearer ${token}` };
                                 const params = {};
-                                if (location) { params.latitude = location.latitude; params.longitude = location.longitude; }
-                                if (wifiSSID) { params.wifi_ssid = wifiSSID; }
+                                const locToUse = location || lastKnownLocationRef.current;
+                                const wifiToUse = wifiSSID || lastKnownWifiRef.current;
+                                if (locToUse) { params.latitude = locToUse.latitude; params.longitude = locToUse.longitude; }
+                                if (wifiToUse) { params.wifi_ssid = wifiToUse; }
                                 const res = await axios.get(`${API}/validate-access`, { headers, params });
                                 if (res?.data) {
                                   const d = res.data;

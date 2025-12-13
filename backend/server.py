@@ -585,9 +585,19 @@ async def access_file(request: AccessRequest, current_user: dict = Depends(get_c
                         # WFH approved and within admin-allocated window: bypass wifi/location checks
                         validation_result = {"allowed": True, "reason": "WFH approved - time window active"}
                     else:
-                        validation_result = {"allowed": False, "reason": "Outside approved WFH access window"}
+                        # WFH exists but not active. Fall back to normal geofence validation rather than blocking.
+                        validation_result = geofence_validator.validate_access(
+                            request.model_dump(),
+                            config,
+                            False
+                        )
             else:
-                validation_result = {"allowed": False, "reason": "WFH approved but access window not allocated by admin"}
+                # Admin approved WFH but no window allocated, fall back to normal validation
+                validation_result = geofence_validator.validate_access(
+                    request.model_dump(),
+                    config,
+                    False
+                )
         else:
             # No WFH approval - validate normally (must satisfy wifi, location, and time bounds)
             validation_result = geofence_validator.validate_access(
