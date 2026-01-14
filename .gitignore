@@ -42,6 +42,10 @@ frontend/.env
 *token.json*
 *credentials.json*
 
+# Documentation files (private - not shared on GitHub)
+*.md
+!node_modules/**/*.md
+
 # Logs and debug files
 npm-debug.log*
 yarn-debug.log*
