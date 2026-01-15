@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Depends, Header, Response
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Depends, Header, Response, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -256,7 +256,7 @@ def _parse_iso_to_utc(s: Optional[str]) -> Optional[datetime]:
 
 # Auth Routes
 @api_router.post("/auth/login")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, background_tasks: BackgroundTasks):
     # Rate limiting check
     if not check_rate_limit(request.username):
         logger.warning(f"Rate limit exceeded for user: {request.username}")
@@ -285,12 +285,8 @@ async def login(request: LoginRequest):
         {"$set": {"otp": hashed_otp, "otp_expiry": otp_expiry.isoformat(), "otp_sent_at": datetime.now(timezone.utc).isoformat()}}
     )
     
-    # Send OTP via email
-    try:
-        await send_otp_email(user["email"], otp, user["username"])
-    except Exception as e:
-        logger.error(f"Failed to send OTP: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to send OTP. Please check email configuration.")
+    # Send OTP via email in background (non-blocking)
+    background_tasks.add_task(send_otp_email, user["email"], otp, user["username"])
     
     return {
         "message": "OTP sent to your email",
@@ -301,7 +297,7 @@ async def login(request: LoginRequest):
 
 
 @api_router.post("/auth/resend-otp")
-async def resend_otp(request: ResendOTPRequest):
+async def resend_otp(request: ResendOTPRequest, background_tasks: BackgroundTasks):
     user = await db.users.find_one({"username": request.username}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Authentication failed")  # Generic error
@@ -327,11 +323,8 @@ async def resend_otp(request: ResendOTPRequest):
         {"$set": {"otp": hashed_otp, "otp_expiry": otp_expiry.isoformat(), "otp_sent_at": datetime.now(timezone.utc).isoformat()}}
     )
 
-    try:
-        await send_otp_email(user["email"], otp, user["username"])
-    except Exception as e:
-        logger.error(f"Failed to resend OTP: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to resend OTP. Please check email configuration.")
+    # Send OTP via email in background (non-blocking)
+    background_tasks.add_task(send_otp_email, user["email"], otp, user["username"])
 
     return {"message": "OTP resent to your email"}
 
@@ -953,10 +946,28 @@ async def access_file(request: AccessRequest, current_user: dict = Depends(get_c
             key = crypto_service.string_to_key(file_meta["encryption_key"])
             decrypted_content = crypto_service.decrypt_file(encrypted_content, key)
             
+            # Determine media type based on file extension
+            filename = file_meta['filename'].lower()
+            if filename.endswith('.pdf'):
+                media_type = "application/pdf"
+            elif filename.endswith(('.jpg', '.jpeg')):
+                media_type = "image/jpeg"
+            elif filename.endswith('.png'):
+                media_type = "image/png"
+            elif filename.endswith('.gif'):
+                media_type = "image/gif"
+            elif filename.endswith(('.txt', '.log')):
+                media_type = "text/plain"
+            elif filename.endswith('.json'):
+                media_type = "application/json"
+            else:
+                media_type = "application/octet-stream"
+            
+            # Use inline to allow viewing in browser, not downloading
             return StreamingResponse(
                 io.BytesIO(decrypted_content),
-                media_type="application/octet-stream",
-                headers={"Content-Disposition": f"attachment; filename={file_meta['filename']}"}
+                media_type=media_type,
+                headers={"Content-Disposition": f"inline; filename={file_meta['filename']}"}
             )
         
         # Employee access - check conditions
@@ -1048,10 +1059,28 @@ async def access_file(request: AccessRequest, current_user: dict = Depends(get_c
         key = crypto_service.string_to_key(file_meta["encryption_key"])
         decrypted_content = crypto_service.decrypt_file(encrypted_content, key)
         
+        # Determine media type based on file extension
+        filename = file_meta['filename'].lower()
+        if filename.endswith('.pdf'):
+            media_type = "application/pdf"
+        elif filename.endswith(('.jpg', '.jpeg')):
+            media_type = "image/jpeg"
+        elif filename.endswith('.png'):
+            media_type = "image/png"
+        elif filename.endswith('.gif'):
+            media_type = "image/gif"
+        elif filename.endswith(('.txt', '.log')):
+            media_type = "text/plain"
+        elif filename.endswith('.json'):
+            media_type = "application/json"
+        else:
+            media_type = "application/octet-stream"
+        
+        # Use inline to allow viewing in browser, not downloading
         return StreamingResponse(
             io.BytesIO(decrypted_content),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={file_meta['filename']}"}
+            media_type=media_type,
+            headers={"Content-Disposition": f"inline; filename={file_meta['filename']}"}
         )
     except HTTPException:
         # Re-raise HTTP exceptions as-is (with CORS headers)

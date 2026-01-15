@@ -121,22 +121,32 @@ def install_dependencies():
         print_info("Creating Python virtual environment...")
         try:
             subprocess.run([sys.executable, '-m', 'venv', 'venv'],
-                          cwd=backend_path, check=True)
+                          cwd=backend_path, check=True, timeout=60)
             print_success("Virtual environment created")
         except subprocess.CalledProcessError as e:
             print_error(f"Failed to create virtual environment: {e}")
             return False
-    
-    # Install backend packages
-    try:
-        subprocess.run([venv_python, '-m', 'pip', 'install', '--upgrade', 'pip'],
-                      cwd=backend_path, check=True, capture_output=True)
-        subprocess.run([venv_python, '-m', 'pip', 'install', '-r', 'requirements.txt'],
-                      cwd=backend_path, check=True, capture_output=True)
-        print_success("Backend dependencies installed")
-    except subprocess.CalledProcessError as e:
-        print_error(f"Failed to install backend dependencies: {e}")
-        return False
+        except subprocess.TimeoutExpired:
+            print_error("Virtual environment creation timed out")
+            return False
+        
+        # Only install pip packages if venv was just created
+        print_info("Installing backend packages (this may take a minute)...")
+        try:
+            subprocess.run([venv_python, '-m', 'pip', 'install', '--upgrade', 'pip'],
+                          cwd=backend_path, check=True, timeout=120)
+            subprocess.run([venv_python, '-m', 'pip', 'install', '-r', 'requirements.txt'],
+                          cwd=backend_path, check=True, timeout=300)
+            print_success("Backend dependencies installed")
+        except subprocess.CalledProcessError as e:
+            print_error(f"Failed to install backend dependencies: {e}")
+            return False
+        except subprocess.TimeoutExpired:
+            print_error("Backend dependency installation timed out - this can happen with slow connections")
+            print_error("You may need to run manually: cd backend && python -m pip install -r requirements.txt")
+            print_error("Continuing anyway...")
+    else:
+        print_success("Backend virtual environment already exists")
     
     # Frontend dependencies
     print_info("Checking frontend dependencies...")
@@ -146,14 +156,18 @@ def install_dependencies():
     if os.path.exists(node_modules):
         print_success("Frontend dependencies already installed")
     else:
-        print_info("Installing frontend dependencies...")
+        print_info("Installing frontend dependencies (this may take a minute)...")
         try:
             subprocess.run(['npm', 'install', '--legacy-peer-deps'], 
-                          cwd=frontend_path, check=True, capture_output=True)
+                          cwd=frontend_path, check=True, timeout=300)
             print_success("Frontend dependencies installed")
         except subprocess.CalledProcessError as e:
             print_error(f"Failed to install frontend dependencies: {e}")
             return False
+        except subprocess.TimeoutExpired:
+            print_error("Frontend dependency installation timed out - this can happen with slow connections")
+            print_error("You may need to run manually: cd frontend && npm install --legacy-peer-deps")
+            print_error("Continuing anyway...")
     
     print()
     return True

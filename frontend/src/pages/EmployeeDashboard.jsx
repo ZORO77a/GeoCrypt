@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { FileText, MapPin, Wifi, Clock, LogOut, Download } from 'lucide-react';
+import { FileText, MapPin, Wifi, Clock, LogOut, Download, Eye, X } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -40,6 +40,14 @@ function EmployeeDashboard() {
   const token = localStorage.getItem('token');
   const username = localStorage.getItem('username');
 
+  // File viewer state
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerFile, setViewerFile] = useState(null);
+  const [viewerContent, setViewerContent] = useState('');
+  const [viewerBlob, setViewerBlob] = useState(null);
+  const [viewerExpiry, setViewerExpiry] = useState(null);
+  const [pdfDataUrl, setPdfDataUrl] = useState(null);
+
   // Handle browser back button
   useEffect(() => {
     // Push a new state to prevent going back to OTP/login page
@@ -55,6 +63,19 @@ function EmployeeDashboard() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  // Convert PDF blob to data URL for viewing
+  useEffect(() => {
+    if (viewerBlob && viewerFile && viewerFile.filename.toLowerCase().endsWith('.pdf')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPdfDataUrl(e.target.result);
+      };
+      reader.readAsDataURL(viewerBlob);
+    } else {
+      setPdfDataUrl(null);
+    }
+  }, [viewerBlob, viewerFile]);
 
   useEffect(() => {
     if (!token) {
@@ -216,6 +237,103 @@ function EmployeeDashboard() {
   const confirmLogout = () => {
     localStorage.clear();
     navigate('/employee/login');
+  };
+
+  const handleFileView = async (file) => {
+    const locToUse = location || lastKnownLocationRef.current;
+    const wifiToUse = wifiSSID || lastKnownWifiRef.current;
+
+    // Determine if WFH bypass is active for this employee
+    let wfhActive = false;
+    if (wfhStatus && wfhStatus.status === 'approved') {
+      try {
+        if (wfhStatus.access_start && wfhStatus.access_end) {
+          const start = new Date(wfhStatus.access_start);
+          const end = new Date(wfhStatus.access_end);
+          const now = new Date();
+          if (start <= now && now <= end) {
+            wfhActive = true;
+          }
+        }
+      } catch (e) {
+        // If parsing fails, treat as not active
+      }
+    }
+
+    if (!wfhActive) {
+      if (!locToUse) {
+        toast.error('Location not detected. Please enable location access.');
+        return;
+      }
+      if (!wifiToUse) {
+        toast.error('Please enter WiFi SSID');
+        return;
+      }
+    }
+
+    try {
+      const payload = { file_id: file.file_id };
+      if (!wfhActive) {
+        payload.latitude = locToUse.latitude;
+        payload.longitude = locToUse.longitude;
+        payload.wifi_ssid = wifiToUse;
+      }
+
+      const response = await axios.post(
+        `${API}/files/access`,
+        payload,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+
+      // Handle different file types
+      const fileName = file.filename.toLowerCase();
+      const isTextFile = fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.log') || fileName.endsWith('.json') || fileName.endsWith('.csv');
+      const isImageFile = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName);
+      const isPdfFile = fileName.endsWith('.pdf');
+      
+      setViewerFile(file);
+      setViewerBlob(response.data);
+      
+      // Only convert to text for text files
+      if (isTextFile) {
+        const text = await response.data.text();
+        setViewerContent(text);
+      } else {
+        setViewerContent('');
+      }
+      
+      // Set expiry to 15 minutes from now
+      const expiryTime = new Date();
+      expiryTime.setMinutes(expiryTime.getMinutes() + 15);
+      setViewerExpiry(expiryTime);
+      setViewerOpen(true);
+
+      toast.success('File access granted for 15 minutes');
+    } catch (error) {
+      let detail = error.response?.data?.detail;
+      if (!detail && error.response && error.response.data instanceof Blob) {
+        try {
+          const text = await error.response.data.text();
+          const parsed = JSON.parse(text);
+          detail = parsed?.detail || text;
+        } catch (err) {
+          detail = null;
+        }
+      }
+
+      let errorMsg = 'Access denied';
+      if (Array.isArray(detail)) {
+        errorMsg = detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+      } else if (typeof detail === 'string') {
+        errorMsg = detail;
+      } else if (detail && typeof detail === 'object') {
+        errorMsg = detail.reason || JSON.stringify(detail);
+      }
+      toast.error(errorMsg);
+    }
   };
 
   const handleFileAccess = async (file) => {
@@ -680,33 +798,51 @@ function EmployeeDashboard() {
                         <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                           <button 
                             className="primary-btn" 
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             data-testid={`download-btn-${file.file_id}`}
-                            onClick={() => file.accessible ? handleFileAccess(file) : toast.error(file.access_reason || 'File is locked')}
+                            onClick={() => file.accessible ? handleFileView(file) : toast.error(file.access_reason || 'File is locked')}
                             disabled={!file.accessible}
                           >
-                            <Download size={16} style={{ display: 'inline', marginRight: '6px' }} />
-                            {file.accessible ? 'Download' : 'Locked'}
+                            <Eye size={16} style={{ marginRight: '6px' }} />
+                            {file.accessible ? 'View' : 'Locked'}
                           </button>
                           <button
                             className="secondary-btn"
                             style={{ width: '120px' }}
                             onClick={async () => {
                               try {
-                                const token = getAccessToken();
-                                const headers = token ? { Authorization: `Bearer ${token}` } : {};
                                 const params = {};
                                 const locToUse = location || lastKnownLocationRef.current;
                                 const wifiToUse = wifiSSID || lastKnownWifiRef.current;
                                 if (locToUse) { params.latitude = locToUse.latitude; params.longitude = locToUse.longitude; }
                                 if (wifiToUse) { params.wifi_ssid = wifiToUse; }
-                                const res = await axios.get(`${API}/validate-access`, { headers, params, withCredentials: true });
-                                if (res?.data) {
-                                  const d = res.data;
-                                  toast(`${d.reason}. validation: location=${d.validations.location}, wifi=${d.validations.wifi}, time=${d.validations.time}`);
+                                
+                                console.log('Validate params:', params);
+                                const res = await axios.get(`${API}/validate-access`, { params, withCredentials: true });
+                                console.log('Validate response:', res.data);
+                                
+                                const d = res.data;
+                                if (d.allowed) {
+                                  toast.success(`✓ Files can now be accessed - ${d.reason}`);
+                                } else {
+                                  toast.error(`✗ Files can't be accessed - ${d.reason}`);
                                 }
                               } catch (e) {
-                                toast.error('Failed to validate access');
+                                console.error('Validate error:', e);
+                                let errorMsg = 'Failed to validate access';
+                                if (e.response?.data) {
+                                  const respData = e.response.data;
+                                  if (respData.reason) {
+                                    errorMsg = respData.reason;
+                                    if (respData.allowed === false) {
+                                      toast.error(`✗ Files can't be accessed - ${errorMsg}`);
+                                      return;
+                                    }
+                                  } else if (respData.detail) {
+                                    errorMsg = respData.detail;
+                                  }
+                                }
+                                toast.error(`✗ Files can't be accessed - ${errorMsg}`);
                               }
                             }}
                           >
@@ -777,6 +913,223 @@ function EmployeeDashboard() {
                 >
                   Yes, Logout
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* File Viewer Modal */}
+        {viewerOpen && viewerFile && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              width: '95%',
+              maxWidth: '1400px',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+            }}>
+              {/* Header */}
+              <div style={{
+                padding: '20px',
+                borderBottom: '1px solid #e5e7eb',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div>
+                  <h2 style={{ margin: '0 0 8px 0', color: '#1f2937' }}>{viewerFile.filename}</h2>
+                  <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                    Access expires in {viewerExpiry ? Math.max(0, Math.ceil((viewerExpiry - new Date()) / 1000)) : 0} seconds
+                    {viewerExpiry && (viewerExpiry - new Date()) <= 60000 && ' ⚠️'}
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setViewerOpen(false);
+                    setViewerFile(null);
+                    setViewerContent('');
+                    setViewerBlob(null);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '24px',
+                    cursor: 'pointer',
+                    color: '#6b7280'
+                  }}
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: '20px',
+                backgroundColor: '#f9fafb',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                {viewerBlob && (() => {
+                  const fileName = viewerFile.filename.toLowerCase();
+                  const isImageFile = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName);
+                  const isPdfFile = fileName.endsWith('.pdf');
+                  const isTextFile = fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.log') || fileName.endsWith('.json') || fileName.endsWith('.csv');
+                  
+                  if (isImageFile) {
+                    const imageUrl = URL.createObjectURL(viewerBlob);
+                    return (
+                      <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{
+                          opacity: 0.15,
+                          position: 'fixed',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%) rotate(-45deg)',
+                          fontSize: '60px',
+                          fontWeight: 'bold',
+                          color: '#999',
+                          pointerEvents: 'none',
+                          zIndex: 0,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {username} - {new Date().toLocaleDateString()}
+                        </div>
+                        <img 
+                          src={imageUrl} 
+                          alt={viewerFile.filename} 
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onLoad={() => URL.revokeObjectURL(imageUrl)}
+                        />
+                      </div>
+                    );
+                  } else if (isPdfFile) {
+                    return (
+                      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                        <div style={{
+                          opacity: 0.15,
+                          position: 'fixed',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%) rotate(-45deg)',
+                          fontSize: '60px',
+                          fontWeight: 'bold',
+                          color: '#999',
+                          pointerEvents: 'none',
+                          zIndex: 0,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {username} - {new Date().toLocaleDateString()}
+                        </div>
+                        {pdfDataUrl ? (
+                          <iframe 
+                            src={`${pdfDataUrl}#toolbar=1&navpanes=0&scrollbar=0`}
+                            style={{ width: '100%', height: '100%', border: 'none' }}
+                            title={viewerFile.filename}
+                            allow="fullscreen"
+                          ></iframe>
+                        ) : (
+                          <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>Loading PDF...</div>
+                        )}
+                      </div>
+                    );
+                  } else if (isTextFile) {
+                    return (
+                      <div style={{
+                        backgroundColor: 'white',
+                        padding: '20px',
+                        borderRadius: '8px',
+                        fontFamily: 'monospace',
+                        fontSize: '13px',
+                        lineHeight: '1.6',
+                        color: '#1f2937',
+                        border: '1px solid #e5e7eb',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        userSelect: 'none',
+                        WebkitUserSelect: 'none',
+                        WebkitTouchCallout: 'none',
+                        width: '100%',
+                        position: 'relative'
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        toast.error('Copying is disabled for security reasons');
+                      }}>
+                        <div style={{
+                          opacity: 0.15,
+                          position: 'fixed',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%) rotate(-45deg)',
+                          fontSize: '60px',
+                          fontWeight: 'bold',
+                          color: '#999',
+                          pointerEvents: 'none',
+                          zIndex: 0,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {username} - {new Date().toLocaleDateString()}
+                        </div>
+                        {viewerContent}
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div style={{ textAlign: 'center', color: '#6b7280' }}>
+                        <div style={{ fontSize: '16px', marginBottom: '10px' }}>File format not directly viewable</div>
+                        <button 
+                          onClick={() => {
+                            const url = URL.createObjectURL(viewerBlob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = viewerFile.filename;
+                            link.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          style={{
+                            padding: '10px 20px',
+                            backgroundColor: '#667eea',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '14px'
+                          }}
+                        >
+                          Download File
+                        </button>
+                      </div>
+                    );
+                  }
+                })()}
+              </div>
+
+              {/* Footer */}
+              <div style={{
+                padding: '16px 20px',
+                borderTop: '1px solid #e5e7eb',
+                backgroundColor: '#f3f4f6',
+                fontSize: '12px',
+                color: '#6b7280'
+              }}>
+                <strong>Security Notice:</strong> This file can only be viewed for 15 minutes. All access is logged. Screenshots and downloads are disabled.
               </div>
             </div>
           </div>
