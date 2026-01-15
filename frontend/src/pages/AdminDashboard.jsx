@@ -28,6 +28,14 @@ function AdminDashboard() {
   const username = localStorage.getItem('username');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
+  // File viewer state
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerFile, setViewerFile] = useState(null);
+  const [viewerContent, setViewerContent] = useState('');
+  const [viewerBlob, setViewerBlob] = useState(null);
+  const [viewerExpiry, setViewerExpiry] = useState(null);
+  const [pdfDataUrl, setPdfDataUrl] = useState(null);
+
   // Persist active tab to localStorage and update ref
   useEffect(() => {
     localStorage.setItem('adminActiveTab', activeTab);
@@ -56,6 +64,19 @@ function AdminDashboard() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  // Convert PDF blob to data URL for viewing
+  useEffect(() => {
+    if (viewerBlob && viewerFile && viewerFile.filename.toLowerCase().endsWith('.pdf')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPdfDataUrl(e.target.result);
+      };
+      reader.readAsDataURL(viewerBlob);
+    } else {
+      setPdfDataUrl(null);
+    }
+  }, [viewerBlob, viewerFile]);
 
   useEffect(() => {
     if (!token) {
@@ -94,6 +115,65 @@ function AdminDashboard() {
   const confirmLogout = () => {
     localStorage.clear();
     navigate('/admin/login');
+  };
+
+  const handleFileView = async (file) => {
+    try {
+      const response = await axios.post(
+        `${API}/files/access`,
+        { file_id: file.file_id },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+
+      // Handle different file types
+      const fileName = file.filename.toLowerCase();
+      const isTextFile = fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.log') || fileName.endsWith('.json') || fileName.endsWith('.csv');
+      const isImageFile = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName);
+      const isPdfFile = fileName.endsWith('.pdf');
+      
+      setViewerFile(file);
+      setViewerBlob(response.data);
+      
+      // Only convert to text for text files
+      if (isTextFile) {
+        const text = await response.data.text();
+        setViewerContent(text);
+      } else {
+        setViewerContent('');
+      }
+      
+      // Admin has no time limit - set expiry to far future (24 hours)
+      const expiryTime = new Date();
+      expiryTime.setHours(expiryTime.getHours() + 24);
+      setViewerExpiry(expiryTime);
+      setViewerOpen(true);
+
+      // No success toast for admin
+    } catch (error) {
+      let detail = error.response?.data?.detail;
+      if (!detail && error.response && error.response.data instanceof Blob) {
+        try {
+          const text = await error.response.data.text();
+          const parsed = JSON.parse(text);
+          detail = parsed?.detail || text;
+        } catch (err) {
+          detail = null;
+        }
+      }
+
+      let errorMsg = 'Access denied';
+      if (Array.isArray(detail)) {
+        errorMsg = detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+      } else if (typeof detail === 'string') {
+        errorMsg = detail;
+      } else if (detail && typeof detail === 'object') {
+        errorMsg = detail.reason || JSON.stringify(detail);
+      }
+      toast.error(errorMsg);
+    }
   };
 
   const handleCreateEmployee = async (e) => {
@@ -461,6 +541,7 @@ function AdminDashboard() {
                     <th>Size</th>
                     <th>Encrypted</th>
                     <th>Date</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -473,6 +554,15 @@ function AdminDashboard() {
                         <span className="badge badge-success">Yes</span>
                       </td>
                       <td>{new Date(file.uploaded_at).toLocaleDateString()}</td>
+                      <td>
+                        <button 
+                          className="primary-btn" 
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
+                          onClick={() => handleFileView(file)}
+                        >
+                          View
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -743,6 +833,237 @@ function AdminDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* File Viewer Modal */}
+      {viewerOpen && viewerFile && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            width: '95%',
+            maxWidth: '1400px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '20px',
+              borderBottom: '1px solid #e5e7eb',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h2 style={{ margin: '0 0 8px 0', color: '#1f2937' }}>{viewerFile.filename}</h2>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                  Admin - No time limit
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setViewerOpen(false);
+                  setViewerFile(null);
+                  setViewerContent('');
+                  setViewerBlob(null);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: '#6b7280'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content */}
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              padding: '10px',
+              backgroundColor: '#f9fafb',
+              display: 'flex',
+              alignItems: 'stretch',
+              justifyContent: 'stretch'
+            }}>
+              {viewerBlob && (() => {
+                const fileName = viewerFile.filename.toLowerCase();
+                const isImageFile = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName);
+                const isPdfFile = fileName.endsWith('.pdf');
+                const isTextFile = fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.log') || fileName.endsWith('.json') || fileName.endsWith('.csv');
+                
+                if (isImageFile) {
+                  const imageUrl = URL.createObjectURL(viewerBlob);
+                  return (
+                    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{
+                        opacity: 0.15,
+                        position: 'fixed',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%) rotate(-45deg)',
+                        fontSize: '60px',
+                        fontWeight: 'bold',
+                        color: '#999',
+                        pointerEvents: 'none',
+                        zIndex: 0,
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {username} - {new Date().toLocaleDateString()}
+                      </div>
+                      <img 
+                        src={imageUrl} 
+                        alt={viewerFile.filename} 
+                        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                        onLoad={() => URL.revokeObjectURL(imageUrl)}
+                      />
+                    </div>
+                  );
+                } else if (isPdfFile) {
+                  return (
+                    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      <div style={{
+                        opacity: 0.15,
+                        position: 'fixed',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%) rotate(-45deg)',
+                        fontSize: '60px',
+                        fontWeight: 'bold',
+                        color: '#999',
+                        pointerEvents: 'none',
+                        zIndex: 0,
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {username} - {new Date().toLocaleDateString()}
+                      </div>
+                      {pdfDataUrl ? (
+                        <iframe 
+                          src={`${pdfDataUrl}#toolbar=1&navpanes=0&scrollbar=0`}
+                          style={{ width: '100%', height: '100%', border: 'none' }}
+                          title={viewerFile.filename}
+                          allow="fullscreen"
+                        ></iframe>
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>Loading PDF...</div>
+                      )}
+                    </div>
+                  );
+                } else if (isTextFile) {
+                  return (
+                    <div style={{
+                      backgroundColor: 'white',
+                      padding: '15px',
+                      borderRadius: '8px',
+                      fontFamily: 'monospace',
+                      fontSize: '11px',
+                      lineHeight: '1.4',
+                      color: '#1f2937',
+                      border: '1px solid #e5e7eb',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                      width: '100%',
+                      height: '100%',
+                      position: 'relative',
+                      overflow: 'auto'
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      toast.error('Copying is disabled for security reasons');
+                    }}>
+                      <div style={{
+                        opacity: 0.15,
+                        position: 'fixed',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%) rotate(-45deg)',
+                        fontSize: '60px',
+                        fontWeight: 'bold',
+                        color: '#999',
+                        pointerEvents: 'none',
+                        zIndex: 0,
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {username} - {new Date().toLocaleDateString()}
+                      </div>
+                      {viewerContent}
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                      <div style={{ fontSize: '16px', marginBottom: '10px' }}>File format not directly viewable</div>
+                      <button 
+                        onClick={() => {
+                          const url = URL.createObjectURL(viewerBlob);
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.download = viewerFile.filename;
+                          link.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        style={{
+                          padding: '10px 20px',
+                          backgroundColor: '#667eea',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '14px'
+                        }}
+                      >
+                        Download File
+                      </button>
+                    </div>
+                  );
+                }
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '16px 20px',
+              borderTop: '1px solid #e5e7eb',
+              backgroundColor: 'white',
+              borderBottomLeftRadius: '12px',
+              borderBottomRightRadius: '12px',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px'
+            }}>
+              <button
+                onClick={() => {
+                  setViewerOpen(false);
+                  setViewerFile(null);
+                  setViewerContent('');
+                  setViewerBlob(null);
+                }}
+                className="secondary-btn"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );
