@@ -869,7 +869,7 @@ function AdminDashboard() {
               <div>
                 <h2 style={{ margin: '0 0 8px 0', color: '#1f2937' }}>{viewerFile.filename}</h2>
                 <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                  Admin - No time limit
+                  
                 </div>
               </div>
               <button 
