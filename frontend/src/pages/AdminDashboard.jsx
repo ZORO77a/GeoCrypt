@@ -942,6 +942,106 @@ function AdminDashboard() {
                   </div>
                 </div>
 
+                {/* Suspicious Activities List */}
+                {suspiciousAnalysis.suspicious_count > 0 && (
+                  <div style={{ marginBottom: '24px' }}>
+                    <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: 'bold' }}>🔴 Suspicious Activities Detected</h3>
+                    <div style={{ 
+                      display: 'grid', 
+                      gap: '12px',
+                      backgroundColor: '#f9fafb',
+                      padding: '16px',
+                      borderRadius: '8px',
+                      maxHeight: '600px',
+                      overflowY: 'auto'
+                    }}>
+                      {suspiciousAnalysis.findings && suspiciousAnalysis.findings.length > 0 ? (
+                        suspiciousAnalysis.findings.slice(0, 20).map((finding, idx) => (
+                          <div key={idx} style={{
+                            padding: '12px',
+                            backgroundColor: '#fef2f2',
+                            border: '1px solid #fecaca',
+                            borderRadius: '6px'
+                          }}>
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'start',
+                              marginBottom: '6px'
+                            }}>
+                              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
+                                {finding.activity?.employee_username || 'Unknown User'}
+                              </div>
+                              <span style={{
+                                padding: '2px 8px',
+                                backgroundColor: '#fca5a5',
+                                color: '#7f1d1d',
+                                borderRadius: '3px',
+                                fontSize: '11px',
+                                fontWeight: 'bold'
+                              }}>
+                                STATISTICAL ANOMALY
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#374151', marginBottom: '4px' }}>
+                              <strong>Type:</strong> {finding.activity?.log_type?.replace(/_/g, ' ').toUpperCase() || finding.activity?.action?.replace(/_/g, ' ').toUpperCase() || 'Unusual Activity'}
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#374151', marginBottom: '4px' }}>
+                              <strong>Details:</strong> {finding.activity?.action?.replace(/_/g, ' ') || finding.activity?.log_type?.replace(/_/g, ' ') || 'Anomaly Score: ' + (finding.anomaly_score?.toFixed(3) || 'N/A')}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                              <strong>Time:</strong> {finding.activity?.timestamp ? new Date(finding.activity.timestamp).toLocaleString() : 'N/A'}
+                            </div>
+                          </div>
+                        ))
+                      ) : suspiciousAnalysis.rule_based_anomalies && suspiciousAnalysis.rule_based_anomalies.length > 0 ? (
+                        suspiciousAnalysis.rule_based_anomalies.slice(0, 20).map((anomaly, idx) => (
+                          <div key={idx} style={{
+                            padding: '12px',
+                            backgroundColor: anomaly.severity === 'high' ? '#fee2e2' : anomaly.severity === 'medium' ? '#fef3c7' : '#f0fdf4',
+                            border: `1px solid ${anomaly.severity === 'high' ? '#fecaca' : anomaly.severity === 'medium' ? '#fcd34d' : '#bbf7d0'}`,
+                            borderRadius: '6px'
+                          }}>
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'start',
+                              marginBottom: '6px'
+                            }}>
+                              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
+                                {anomaly.activity?.employee_username || 'Unknown User'}
+                              </div>
+                              <span style={{
+                                padding: '2px 8px',
+                                backgroundColor: anomaly.severity === 'high' ? '#fca5a5' : anomaly.severity === 'medium' ? '#fcd34d' : '#86efac',
+                                color: anomaly.severity === 'high' ? '#7f1d1d' : anomaly.severity === 'medium' ? '#78350f' : '#166534',
+                                borderRadius: '3px',
+                                fontSize: '11px',
+                                fontWeight: 'bold'
+                              }}>
+                                {anomaly.severity.toUpperCase()}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#374151', marginBottom: '4px' }}>
+                              <strong>Type:</strong> {anomaly.type?.replace(/_/g, ' ').toUpperCase() || 'Unknown'}
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#374151', marginBottom: '4px' }}>
+                              <strong>Details:</strong> {anomaly.description || 'No description'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                              <strong>Time:</strong> {anomaly.activity?.timestamp ? new Date(anomaly.activity.timestamp).toLocaleString() : 'N/A'}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ textAlign: 'center', padding: '20px', color: '#6b7280' }}>
+                          No suspicious activities details available
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* High Risk Employees */}
                 {Object.keys(suspiciousAnalysis.high_risk_employees || {}).length > 0 && (
                   <div style={{ marginBottom: '24px' }}>
