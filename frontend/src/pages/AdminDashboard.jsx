@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { FileText, Users, Activity, AlertTriangle, Settings, LogOut, Upload, Brain, TrendingUp, Shield } from 'lucide-react';
+import { FileText, Users, Activity, AlertTriangle, Settings, LogOut, Upload, Brain, TrendingUp, Shield, CheckCircle2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import FileService from '@/utils/fileService';
+import CheckInTracking from './CheckInTracking';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -409,6 +410,10 @@ function AdminDashboard() {
                 <h2 className="section-title">Quick Actions</h2>
               </div>
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <button className="primary-btn" onClick={() => setActiveTab('check-in')} data-testid="check-in-tracking-btn" style={{ backgroundColor: '#10b981' }}>
+                  <CheckCircle2 size={16} style={{ display: 'inline', marginRight: '6px' }} />
+                  Check-in Tracking
+                </button>
                 <button className="primary-btn" onClick={() => setActiveTab('employees')} data-testid="manage-employees-btn">
                   <Users size={16} style={{ display: 'inline', marginRight: '6px' }} />
                   Manage Employees
@@ -1158,6 +1163,16 @@ function AdminDashboard() {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {activeTab === 'check-in' && (
+          <div className="dashboard-section">
+            <div className="section-header">
+              <h2 className="section-title">Check-In Tracking</h2>
+              <button className="primary-btn" onClick={() => setActiveTab('overview')}>Back to Overview</button>
+            </div>
+            <CheckInTracking />
           </div>
         )}
 

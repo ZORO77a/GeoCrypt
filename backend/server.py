@@ -817,6 +817,34 @@ async def analyze_suspicious_activities(current_user: dict = Depends(get_current
         logger.error(f"Error in suspicious activity analysis: {e}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
+@api_router.get("/admin/check-ins")
+async def get_check_ins(current_user: dict = Depends(get_current_user)):
+    """Get all employee check-in logs (login events)"""
+    if current_user["role"] != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get all login-related logs
+    check_ins = await db.access_logs.find(
+        {"action": {"$in": ["login", "login_failed"]}}, 
+        {"_id": 0}
+    ).sort("timestamp", -1).to_list(1000)
+    
+    return check_ins
+
+@api_router.get("/admin/file-access")
+async def get_file_access(current_user: dict = Depends(get_current_user)):
+    """Get all file access logs"""
+    if current_user["role"] != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get all file access and download logs
+    file_access = await db.access_logs.find(
+        {"action": {"$in": ["access", "download", "denied"]}}, 
+        {"_id": 0}
+    ).sort("timestamp", -1).to_list(1000)
+    
+    return file_access
+
 @api_router.get("/admin/wfh-requests")
 async def get_wfh_requests(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != UserRole.ADMIN:
