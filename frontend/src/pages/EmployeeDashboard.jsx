@@ -49,6 +49,11 @@ function EmployeeDashboard() {
   const [viewerFile, setViewerFile] = useState(null);
   const [viewerContent, setViewerContent] = useState('');
   const [viewerBlob, setViewerBlob] = useState(null);
+  const [viewerOfficeUrl, setViewerOfficeUrl] = useState(null);
+  const [viewerOfficeError, setViewerOfficeError] = useState(false);
+  const [viewerDocxHtml, setViewerDocxHtml] = useState(null);
+  const [viewerPptxData, setViewerPptxData] = useState(null);
+  const [viewerCurrentSlide, setViewerCurrentSlide] = useState(0);
   const [viewerExpiry, setViewerExpiry] = useState(null);
   const [pdfDataUrl, setPdfDataUrl] = useState(null);
 
@@ -276,6 +281,7 @@ function EmployeeDashboard() {
     }
 
     try {
+      const fileType = fileService.getFileType(file.filename);
       const accessOptions = {
         latitude: wfhActive ? undefined : locToUse.latitude,
         longitude: wfhActive ? undefined : locToUse.longitude,
@@ -294,13 +300,34 @@ function EmployeeDashboard() {
         return;
       }
 
-      const fileType = fileService.getFileType(file.filename);
-      
       setViewerFile(file);
       setViewerBlob(result.data);
-      
+      setViewerOfficeUrl(null);
+      setViewerDocxHtml(null);
+      setViewerPptxData(null);
+
+      // Handle DOCX files with mammoth
+      if (file.filename.toLowerCase().endsWith('.docx')) {
+        try {
+          const html = await fileService.blobToDocxHtml(result.data);
+          setViewerDocxHtml(html);
+        } catch (error) {
+          toast.error('Could not render DOCX: ' + error.message);
+        }
+        setViewerContent('');
+      }
+      // Handle PPTX files with pptxjs
+      else if (file.filename.toLowerCase().endsWith('.pptx')) {
+        try {
+          const pptxData = await fileService.blobToPptxSlides(result.data);
+          setViewerPptxData(pptxData);
+        } catch (error) {
+          toast.error('Could not render PPTX: ' + error.message);
+        }
+        setViewerContent('');
+      }
       // Only convert to text for text files
-      if (fileType.isText) {
+      else if (fileType.isText) {
         const text = await fileService.blobToText(result.data);
         setViewerContent(text);
       } else {
@@ -946,6 +973,11 @@ function EmployeeDashboard() {
                     setViewerFile(null);
                     setViewerContent('');
                     setViewerBlob(null);
+                    setViewerOfficeUrl(null);
+                    setViewerOfficeError(false);
+                    setViewerDocxHtml(null);
+                    setViewerPptxData(null);
+                    setViewerCurrentSlide(0);
                   }}
                   style={{
                     background: 'none',
@@ -969,11 +1001,94 @@ function EmployeeDashboard() {
                 alignItems: 'stretch',
                 justifyContent: 'stretch'
               }}>
-                {viewerBlob && (() => {
+                {viewerDocxHtml ? (
+                  <div 
+                    style={{
+                      width: '100%',
+                      padding: '20px',
+                      backgroundColor: 'white',
+                      overflow: 'auto',
+                      fontFamily: 'Arial, sans-serif',
+                      lineHeight: '1.6',
+                      fontSize: '14px'
+                    }}
+                    dangerouslySetInnerHTML={{ __html: viewerDocxHtml }}
+                  />
+                ) : viewerPptxData ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', padding: '20px' }}>
+                    <div style={{ width: '100%', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {viewerPptxData.slides && viewerPptxData.slides.length > 0 ? (
+                        <img
+                          src={viewerPptxData.slides[viewerCurrentSlide]}
+                          alt={`Slide ${viewerCurrentSlide + 1}`}
+                          style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}
+                        />
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                          No slide content available for this PPTX.
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                      <button
+                        onClick={() => setViewerCurrentSlide(Math.max(0, viewerCurrentSlide - 1))}
+                        disabled={!viewerPptxData.slides || viewerCurrentSlide === 0}
+                        style={{
+                          padding: '8px 14px',
+                          backgroundColor: viewerCurrentSlide === 0 ? '#d1d5db' : '#3b82f6',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: viewerCurrentSlide === 0 ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        ← Prev
+                      </button>
+                      <span style={{ fontWeight: '600' }}>
+                        {viewerPptxData.slides ? viewerCurrentSlide + 1 : 0} / {viewerPptxData.slides ? viewerPptxData.slides.length : 0}
+                      </span>
+                      <button
+                        onClick={() => setViewerCurrentSlide(Math.min(viewerPptxData.slides.length - 1, viewerCurrentSlide + 1))}
+                        disabled={!viewerPptxData.slides || viewerCurrentSlide === viewerPptxData.slides.length - 1}
+                        style={{
+                          padding: '8px 14px',
+                          backgroundColor: viewerCurrentSlide === viewerPptxData.slides.length - 1 ? '#d1d5db' : '#3b82f6',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: viewerCurrentSlide === viewerPptxData.slides.length - 1 ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                ) : viewerOfficeUrl ? (
+                <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  {viewerOfficeError ? (
+                    <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
+                      <div style={{ fontSize: '16px', marginBottom: '20px', fontWeight: 'bold' }}>Preview unavailable</div>
+                      <div style={{ fontSize: '14px', marginBottom: '20px', color: '#9ca3af' }}>
+                        Office Online cannot access this file (usually due to localhost or network restrictions).
+                      </div>
+                    </div>
+                  ) : (
+                    <iframe
+                      src={viewerOfficeUrl}
+                      style={{ width: '100%', height: '100%', border: 'none' }}
+                      title={viewerFile.filename}
+                      allow="fullscreen"
+                      onError={() => setViewerOfficeError(true)}
+                      onLoad={() => setViewerOfficeError(false)}
+                    />
+                  )}
+                </div>
+              ) : viewerBlob && (() => {
                   const fileName = viewerFile.filename.toLowerCase();
                   const isImageFile = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName);
                   const isPdfFile = fileName.endsWith('.pdf');
                   const isTextFile = fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.log') || fileName.endsWith('.json') || fileName.endsWith('.csv');
+                  const isOfficeFile = /\.(doc|docx|ppt|pptx|xls|xlsx|odt|odp|ods)$/i.test(fileName);
                   
                   if (isImageFile) {
                     const imageUrl = URL.createObjectURL(viewerBlob);
@@ -1004,14 +1119,14 @@ function EmployeeDashboard() {
                     );
                   } else if (isPdfFile) {
                     return (
-                      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 180px)', minHeight: '560px' }}>
                         <div style={{
                           opacity: 0.15,
-                          position: 'fixed',
+                          position: 'absolute',
                           top: '50%',
                           left: '50%',
                           transform: 'translate(-50%, -50%) rotate(-45deg)',
-                          fontSize: '60px',
+                          fontSize: '62px',
                           fontWeight: 'bold',
                           color: '#999',
                           pointerEvents: 'none',
@@ -1023,7 +1138,7 @@ function EmployeeDashboard() {
                         {pdfDataUrl ? (
                           <iframe 
                             src={`${pdfDataUrl}#toolbar=1&navpanes=0&scrollbar=0`}
-                            style={{ width: '100%', height: '100%', border: 'none' }}
+                            style={{ width: '100%', height: '100%', border: 'none', minHeight: '560px' }}
                             title={viewerFile.filename}
                             allow="fullscreen"
                           ></iframe>
@@ -1075,6 +1190,118 @@ function EmployeeDashboard() {
                         {viewerContent}
                       </div>
                     );
+                  } else if (isOfficeFile) {
+                    if (viewerDocxHtml) {
+                      return (
+                        <div
+                          className="prose max-w-none"
+                          dangerouslySetInnerHTML={{ __html: viewerDocxHtml }}
+                          style={{
+                            padding: '20px',
+                            backgroundColor: 'white',
+                            borderRadius: '8px',
+                            overflow: 'auto',
+                            width: '100%',
+                            height: '100%'
+                          }}
+                        />
+                      );
+                    } else if (viewerPptxData?.slides?.length > 0) {
+                      return (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '15px',
+                            padding: '20px',
+                            width: '100%',
+                            height: '100%',
+                            overflow: 'auto'
+                          }}
+                        >
+                          {viewerPptxData.slides[viewerCurrentSlide] && (
+                            <img
+                              src={viewerPptxData.slides[viewerCurrentSlide]}
+                              alt={`Slide ${viewerCurrentSlide + 1}`}
+                              style={{ maxWidth: '100%', maxHeight: '500px', borderRadius: '8px' }}
+                            />
+                          )}
+                          <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                            <button
+                              onClick={() =>
+                                setViewerCurrentSlide(
+                                  Math.max(0, viewerCurrentSlide - 1)
+                                )
+                              }
+                              disabled={viewerCurrentSlide === 0}
+                              style={{
+                                padding: '8px 15px',
+                                backgroundColor: viewerCurrentSlide === 0 ? '#d1d5db' : '#667eea',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: viewerCurrentSlide === 0 ? 'not-allowed' : 'pointer',
+                                fontSize: '14px',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              ← Prev
+                            </button>
+                            <span style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>
+                              {viewerCurrentSlide + 1} / {viewerPptxData.slides.length}
+                            </span>
+                            <button
+                              onClick={() =>
+                                setViewerCurrentSlide(
+                                  Math.min(viewerPptxData.slides.length - 1, viewerCurrentSlide + 1)
+                                )
+                              }
+                              disabled={viewerCurrentSlide === viewerPptxData.slides.length - 1}
+                              style={{
+                                padding: '8px 15px',
+                                backgroundColor: viewerCurrentSlide === viewerPptxData.slides.length - 1 ? '#d1d5db' : '#667eea',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: viewerCurrentSlide === viewerPptxData.slides.length - 1 ? 'not-allowed' : 'pointer',
+                                fontSize: '14px',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              Next →
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
+                          <div style={{ fontSize: '16px', marginBottom: '20px', fontWeight: 'bold' }}>Processing file...</div>
+                          <button 
+                            onClick={() => {
+                              const url = URL.createObjectURL(viewerBlob);
+                              const link = document.createElement('a');
+                              link.href = url;
+                              link.download = viewerFile.filename;
+                              link.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            style={{
+                              padding: '10px 20px',
+                              backgroundColor: '#667eea',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: '14px'
+                            }}
+                          >
+                            Download File
+                          </button>
+                        </div>
+                      );
+                    }
                   } else {
                     return (
                       <div style={{ textAlign: 'center', color: '#6b7280' }}>

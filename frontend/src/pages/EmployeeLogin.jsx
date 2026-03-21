@@ -24,7 +24,13 @@ function EmployeeLogin() {
 
       if (response.data.role === 'employee') {
         toast.success('OTP sent to your email!');
-        navigate('/verify-otp', { state: { username, role: 'employee' } });
+        navigate('/verify-otp', {
+          state: {
+            username,
+            role: 'employee',
+            debug_otp: response.data.debug_otp || null
+          }
+        });
       } else {
         toast.error('Employee access only');
       }

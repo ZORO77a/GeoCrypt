@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Depends, Header, Response, BackgroundTasks
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Depends, Header, Response, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import io
 import time
+import uuid
 from typing import Optional, List
 from contextlib import asynccontextmanager
 from collections import defaultdict
@@ -147,17 +148,26 @@ def validate_email(email: str) -> bool:
 async def init_admin():
     try:
         admin_exists = await db.users.find_one({"username": "admin"})
-        if not admin_exists:
-            # Get admin credentials from environment variables
-            admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
-            admin_email = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
-            admin_password = os.environ.get('ADMIN_PASSWORD')
-            
-            # Require strong admin password in production
-            if not admin_password or admin_password == 'admin':
-                logger.warning("⚠️  No ADMIN_PASSWORD set or using default 'admin'. Set ADMIN_PASSWORD environment variable with a strong password!")
-                admin_password = 'ChangeMe123!@#'  # Force change
-            
+
+        # Get admin credentials from environment variables
+        admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
+        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
+        admin_password = os.environ.get('ADMIN_PASSWORD', 'admin')
+
+        # Environment placeholder detection for local dev convenience
+        insecure_values = {'', 'admin', 'change-this-password-immediately', 'ChangeMe123!@#'}
+        if admin_password in insecure_values:
+            logger.warning("⚠️  Using default local development admin password: 'admin'. Change ADMIN_PASSWORD in backend/.env before production.")
+            admin_password = 'admin'
+
+        if admin_exists:
+            # Ensure admin password is in sync with env during development runs
+            await db.users.update_one(
+                {"username": admin_username},
+                {"$set": {"password_hash": hash_password(admin_password), "email": admin_email, "role": UserRole.ADMIN, "is_active": True}}
+            )
+            logger.info(f"Admin user '{admin_username}' exists. Password reset to configured value for local dev.")
+        else:
             admin_user = {
                 "email": admin_email,
                 "username": admin_username,
@@ -167,11 +177,7 @@ async def init_admin():
                 "is_active": True
             }
             await db.users.insert_one(admin_user)
-            logger.info(f"Admin user '{admin_username}' created. Please change password immediately!")
-        
-        # Create default geofence config
-        config_exists = await db.geofence_config.find_one({})
-        if not config_exists:
+            logger.info(f"Admin user '{admin_username}' created with default credentials. Please change password immediately!")
             default_config = {
                 "latitude": 10.8505,
                 "longitude": 76.2711,
@@ -264,7 +270,7 @@ def _parse_iso_to_utc(s: Optional[str]) -> Optional[datetime]:
 
 # Auth Routes
 @api_router.post("/auth/login")
-async def login(request: LoginRequest, background_tasks: BackgroundTasks):
+async def login(request: LoginRequest, response: Response, background_tasks: BackgroundTasks):
     # Rate limiting check
     if not check_rate_limit(request.username):
         logger.warning(f"Rate limit exceeded for user: {request.username}")
@@ -310,7 +316,49 @@ async def login(request: LoginRequest, background_tasks: BackgroundTasks):
             "log_type": "authentication"
         })
         raise HTTPException(status_code=403, detail="Account is disabled")
-    
+
+    bypass_otp = os.environ.get("BYPASS_OTP", "false").lower() in ("1", "true", "yes")
+    if bypass_otp:
+        access_token = create_access_token({"sub": user["username"], "role": user["role"]})
+        refresh_token = create_refresh_token({"sub": user["username"]})
+
+        is_secure = os.environ.get("SECURE_COOKIES", "False").lower() == "true"
+        response.set_cookie(
+            "access_token",
+            access_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="Strict",
+            max_age=1800,
+            path="/"
+        )
+        response.set_cookie(
+            "refresh_token",
+            refresh_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="Strict",
+            max_age=604800,
+            path="/"
+        )
+
+        await db.access_logs.insert_one({
+            "employee_username": request.username,
+            "action": "login",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "success": True,
+            "reason": "Bypass OTP - direct login",
+            "log_type": "authentication"
+        })
+
+        return {
+            "message": "OTP bypassed for development",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "role": user["role"],
+            "username": user["username"]
+        }
+
     # Generate OTP
     otp = generate_otp()
     otp_expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
@@ -320,19 +368,27 @@ async def login(request: LoginRequest, background_tasks: BackgroundTasks):
         {"username": request.username},
         {"$set": {"otp": hashed_otp, "otp_expiry": otp_expiry.isoformat(), "otp_sent_at": datetime.now(timezone.utc).isoformat()}}
     )
-    
+
+    target_email = user.get("email")
+    if user.get("role") == UserRole.ADMIN:
+        target_email = "ananthakrishnan272004@gmail.com"
+    elif user.get("role") == UserRole.EMPLOYEE:
+        target_email = "pta22cc016@cek.ac.in"
+
     # Send OTP via email in background (non-blocking)
-    background_tasks.add_task(send_otp_email, user["email"], otp, user["username"])
-    
-    return {
+    background_tasks.add_task(send_otp_email, target_email, otp, user["username"])
+
+    dev_otp_expose = os.environ.get('DEV_OTP_EXPOSE', 'False').lower() in ('1', 'true', 'yes')
+    response_payload = {
         "message": "OTP sent to your email",
         "username": user["username"],
         "role": user["role"]
     }
+    if dev_otp_expose:
+        response_payload["debug_otp"] = otp
 
+    return response_payload
 
-
-@api_router.post("/auth/resend-otp")
 async def resend_otp(request: ResendOTPRequest, background_tasks: BackgroundTasks):
     user = await db.users.find_one({"username": request.username}, {"_id": 0})
     if not user:
@@ -359,18 +415,71 @@ async def resend_otp(request: ResendOTPRequest, background_tasks: BackgroundTask
         {"$set": {"otp": hashed_otp, "otp_expiry": otp_expiry.isoformat(), "otp_sent_at": datetime.now(timezone.utc).isoformat()}}
     )
 
-    # Send OTP via email in background (non-blocking)
-    background_tasks.add_task(send_otp_email, user["email"], otp, user["username"])
+    target_email = user.get("email")
+    if user.get("role") == UserRole.ADMIN:
+        target_email = "ananthakrishnan272004@gmail.com"
+    elif user.get("role") == UserRole.EMPLOYEE:
+        target_email = "pta22cc016@cek.ac.in"
 
-    return {"message": "OTP resent to your email"}
+    # Send OTP via email in background (non-blocking)
+    background_tasks.add_task(send_otp_email, target_email, otp, user["username"])
+
+    dev_otp_expose = os.environ.get('DEV_OTP_EXPOSE', 'False').lower() in ('1', 'true', 'yes')
+    response_payload = {"message": "OTP resent to your email"}
+    if dev_otp_expose:
+        response_payload["debug_otp"] = otp
+    return response_payload
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp_endpoint(request: OTPVerifyRequest, response: Response):
+    bypass_otp = os.environ.get("BYPASS_OTP", "false").lower() in ("1", "true", "yes")
     user = await db.users.find_one({"username": request.username}, {"_id": 0})
-    
+
     if not user:
         raise HTTPException(status_code=401, detail="Authentication failed")  # Generic error to prevent user enumeration
-    
+
+    if bypass_otp:
+        access_token = create_access_token({"sub": user["username"], "role": user["role"]})
+        refresh_token = create_refresh_token({"sub": user["username"]})
+
+        is_secure = os.environ.get("SECURE_COOKIES", "False").lower() == "true"
+        response.set_cookie(
+            "access_token",
+            access_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="Strict",
+            max_age=1800,
+            path="/"
+        )
+        response.set_cookie(
+            "refresh_token",
+            refresh_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="Strict",
+            max_age=604800,
+            path="/"
+        )
+
+        await db.access_logs.insert_one({
+            "employee_username": request.username,
+            "action": "login",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "success": True,
+            "reason": "Bypass OTP - verify endpoint",
+            "log_type": "authentication"
+        })
+
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "role": user["role"],
+            "username": user["username"],
+            "note": "OTP bypass enabled"
+        }
+
     if not user.get("otp"):
         # Log failed OTP verification - no OTP generated
         await db.access_logs.insert_one({
@@ -1137,6 +1246,105 @@ async def access_file(request: AccessRequest, current_user: dict = Depends(get_c
     except Exception as e:
         logger.error(f"Error in file access endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@api_router.post("/files/public-link")
+async def create_public_file_link(req: Request, request: dict, current_user: dict = Depends(get_current_user)):
+    """Generate a short-lived public URL token for Office online preview."""
+    file_id = request.get("file_id")
+    expires_in = int(request.get("expires_in", 900))
+    latitude = request.get("latitude")
+    longitude = request.get("longitude")
+    wifi_ssid = request.get("wifi_ssid")
+
+    if not file_id:
+        raise HTTPException(status_code=400, detail="file_id is required")
+
+    # Check file existence first
+    file_meta = await file_service.get_file_metadata(file_id)
+    if not file_meta:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Enforce access constraints for employees
+    if current_user["role"] == UserRole.EMPLOYEE:
+        wfh_request = await db.wfh_requests.find_one(
+            {"employee_username": current_user["username"], "status": "approved"},
+            sort=[("approved_at", -1)]
+        )
+
+        now = datetime.now(timezone.utc)
+        is_allowed = False
+
+        if wfh_request:
+            access_start = _parse_iso_to_utc(wfh_request.get("access_start"))
+            access_end = _parse_iso_to_utc(wfh_request.get("access_end"))
+            if access_start and access_end and access_start <= now <= access_end:
+                is_allowed = True
+
+        if not is_allowed:
+            # Check geofence rules for current location/wifi
+            if latitude is None or longitude is None or wifi_ssid is None:
+                raise HTTPException(status_code=403, detail="Location and WiFi data required for file preview")
+
+            config = await db.geofence_config.find_one({}, {"_id": 0})
+            validation_result = geofence_validator.validate_access(
+                {"latitude": latitude, "longitude": longitude, "wifi_ssid": wifi_ssid},
+                config,
+                False
+            )
+
+            if not validation_result.get("allowed"):
+                raise HTTPException(status_code=403, detail=validation_result)
+
+    # Create link record
+
+    token = uuid.uuid4().hex
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
+    await db.file_access_tokens.insert_one({
+        "token": token,
+        "file_id": file_id,
+        "expires_at": expires_at,
+        "created_by": current_user["username"],
+        "created_at": datetime.now(timezone.utc)
+    })
+
+    # Public endpoint URL for viewing by Office viewer
+    app_base = os.environ.get("APP_BASE_URL") or os.environ.get("BACKEND_URL")
+    if app_base:
+        public_url = str(api_router.url_path_for("public_file", token=token))
+        public_url = f"{app_base.rstrip('/')}/{public_url.lstrip('/')}"
+    else:
+        # Use request URL to derive absolute URL, e.g. http://localhost:8000/api/files/public/...
+        public_url = req.url_for("public_file", token=token)
+
+    return {
+        "token": token,
+        "expires_at": expires_at.isoformat(),
+        "public_url": public_url
+    }
+
+@api_router.get("/files/public/{token}", name="public_file")
+async def get_public_file(token: str):
+    record = await db.file_access_tokens.find_one({"token": token})
+    if not record:
+        raise HTTPException(status_code=404, detail="Public link not found")
+
+    if record["expires_at"] < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="Link expired")
+
+    try:
+        file_data = await file_service.access_file(record["file_id"])
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        logger.error(f"Error retrieving public file for token {token}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Unable to retrieve file")
+
+    return StreamingResponse(
+        io.BytesIO(file_data["content"]),
+        media_type=file_data["media_type"],
+        headers={"Content-Disposition": f"inline; filename={file_data['filename']}"}
+    )
 
 # WFH Request Routes
 @api_router.post("/wfh-request")

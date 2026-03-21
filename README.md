@@ -13,7 +13,7 @@ Then open: **http://localhost:3000**
 
 ### Default Admin Credentials
 - **Username:** `admin`
-- **Password:** `admin`
+- **Password:** `admin` (local development; update `backend/.env` `ADMIN_PASSWORD` before production)
 - **Email:** `ananthakrishnan272004@gmail.com`
 
 ### Service URLs (Local)

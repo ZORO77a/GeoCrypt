@@ -24,7 +24,13 @@ function AdminLogin() {
 
       if (response.data.role === 'admin') {
         toast.success('OTP sent to your email!');
-        navigate('/verify-otp', { state: { username, role: 'admin' } });
+        navigate('/verify-otp', {
+          state: {
+            username,
+            role: 'admin',
+            debug_otp: response.data.debug_otp || null
+          }
+        });
       } else {
         toast.error('Admin access only');
       }

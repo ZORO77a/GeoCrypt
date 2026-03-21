@@ -234,10 +234,27 @@ class FileService:
             '.bmp': 'image/bmp'
         }
         
+        # Support Microsoft Office Open XML formats with in-browser handlers where available
+        office_mime_types = {
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.ppt': 'application/vnd.ms-powerpoint',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            '.xls': 'application/vnd.ms-excel',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.odt': 'application/vnd.oasis.opendocument.text',
+            '.odp': 'application/vnd.oasis.opendocument.presentation',
+            '.ods': 'application/vnd.oasis.opendocument.spreadsheet'
+        }
+
+        for ext, mime_type in office_mime_types.items():
+            if filename_lower.endswith(ext):
+                return mime_type
+
         for ext, mime_type in mime_types.items():
             if filename_lower.endswith(ext):
                 return mime_type
-        
+
         return 'application/octet-stream'
     
     async def log_file_access(

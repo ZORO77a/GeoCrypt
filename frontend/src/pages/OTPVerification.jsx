@@ -17,14 +17,18 @@ function OTPVerification() {
   const location = useLocation();
   const inputRefs = useRef([]);
 
-  const { username, role } = location.state || {};
+  const { username, role, debug_otp } = location.state || {};
 
   useEffect(() => {
     if (!username || !role) {
       toast.error('Invalid session');
       navigate('/admin/login');
+      return;
     }
-  }, [username, role, navigate]);
+    if (debug_otp) {
+      toast.success(`Dev OTP: ${debug_otp}`);
+    }
+  }, [username, role, debug_otp, navigate]);
 
   // OTP Timer
   useEffect(() => {
@@ -146,6 +150,11 @@ function OTPVerification() {
           <div className="login-logo">🔒</div>
           <h1 className="login-title">Verify OTP</h1>
           <p className="login-subtitle">Enter the code sent to your email</p>
+          {debug_otp && (
+            <p style={{ color: '#14b8a6', fontWeight: '600', marginTop: '0.5rem' }}>
+              Dev OTP: {debug_otp}
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleVerify}>
