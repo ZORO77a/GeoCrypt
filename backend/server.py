@@ -151,7 +151,7 @@ async def init_admin():
 
         # Get admin credentials from environment variables
         admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
-        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
+        admin_email = os.environ.get('ADMIN_EMAIL', 'ananthakrishnan272004@gmail.com')
         admin_password = os.environ.get('ADMIN_PASSWORD', 'admin')
 
         # Environment placeholder detection for local dev convenience
@@ -370,10 +370,8 @@ async def login(request: LoginRequest, response: Response, background_tasks: Bac
     )
 
     target_email = user.get("email")
-    if user.get("role") == UserRole.ADMIN:
-        target_email = "ananthakrishnan272004@gmail.com"
-    elif user.get("role") == UserRole.EMPLOYEE:
-        target_email = "pta22cc016@cek.ac.in"
+    if not target_email:
+        raise HTTPException(status_code=500, detail="User email not configured")
 
     # Send OTP via email in background (non-blocking)
     background_tasks.add_task(send_otp_email, target_email, otp, user["username"])
@@ -416,10 +414,8 @@ async def resend_otp(request: ResendOTPRequest, background_tasks: BackgroundTask
     )
 
     target_email = user.get("email")
-    if user.get("role") == UserRole.ADMIN:
-        target_email = "ananthakrishnan272004@gmail.com"
-    elif user.get("role") == UserRole.EMPLOYEE:
-        target_email = "pta22cc016@cek.ac.in"
+    if not target_email:
+        raise HTTPException(status_code=500, detail="User email not configured")
 
     # Send OTP via email in background (non-blocking)
     background_tasks.add_task(send_otp_email, target_email, otp, user["username"])

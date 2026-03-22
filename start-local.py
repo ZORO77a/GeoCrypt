@@ -172,9 +172,38 @@ def install_dependencies():
     print()
     return True
 
+def check_and_free_ports():
+    """Check for and free up required ports"""
+    print_info("Checking and freeing required ports...")
+    
+    ports_to_check = [8000, 3000]
+    for port in ports_to_check:
+        try:
+            # Check if port is in use
+            result = subprocess.run(['lsof', '-ti', f':{port}'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                print_info(f"Port {port} is in use by PIDs: {', '.join(pids)}. Killing...")
+                for pid in pids:
+                    try:
+                        subprocess.run(['kill', '-9', pid], timeout=5)
+                        print_info(f"Killed process {pid} on port {port}")
+                    except subprocess.TimeoutExpired:
+                        print_error(f"Failed to kill process {pid}")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass  # lsof not available or timeout
+    
+    # Give processes time to die
+    time.sleep(2)
+    print_success("Port check complete")
+
 def start_services():
     """Start both backend and frontend services"""
     print_header("Starting Services")
+    
+    # Check and free ports first
+    check_and_free_ports()
     
     # Backend process
     print_info("Starting backend server...")

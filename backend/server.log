@@ -1,0 +1,25 @@
+/home/kali/Desktop/Geofence/geofence-front&back/backend/server.py:1436: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("shutdown")
+INFO:     Started server process [55323]
+INFO:     Waiting for application startup.
+2026-03-21 09:38:12,124 - __main__ - INFO - Starting up application...
+2026-03-21 09:38:12,129 - __main__ - WARNING - ⚠️  Using default local development admin password: 'admin'. Change ADMIN_PASSWORD in backend/.env before production.
+2026-03-21 09:38:12,377 - __main__ - INFO - Admin user 'admin' exists. Password reset to configured value for local dev.
+2026-03-21 09:38:12,378 - __main__ - INFO - Application startup complete
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51600 - "POST /api/auth/login HTTP/1.1" 200 OK
+2026-03-21 09:38:14,309 - email_service - INFO - Attempting OTP SMTP send via smtp.sendgrid.net:587 (use_tls=False, start_tls=True)
+INFO:     Shutting down
+INFO:     Waiting for background tasks to complete. (CTRL+C to force quit)
+2026-03-21 09:38:16,086 - email_service - INFO - OTP email sent successfully to admin@example.com via smtp.sendgrid.net:587
+INFO:     Waiting for application shutdown.
+2026-03-21 09:38:16,124 - __main__ - INFO - Shutting down application...
+2026-03-21 09:38:16,125 - __main__ - INFO - Application shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [55323]
