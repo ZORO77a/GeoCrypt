@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { FileText, Users, Activity, AlertTriangle, Settings, LogOut, Upload, Brain, TrendingUp, Shield, CheckCircle2 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import FileService from '@/utils/fileService';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import FileService from '../utils/fileService';
 import CheckInTracking from './CheckInTracking';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;

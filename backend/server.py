@@ -547,7 +547,6 @@ async def verify_otp_endpoint(request: OTPVerifyRequest, response: Response):
         path="/"
     )
     
-    # Also return tokens for immediate use (backward compatibility)
     # Log successful login
     await db.access_logs.insert_one({
         "employee_username": request.username,
@@ -564,7 +563,7 @@ async def verify_otp_endpoint(request: OTPVerifyRequest, response: Response):
         "token_type": "bearer",
         "role": user["role"],
         "username": user["username"],
-        "note": "Tokens also set in httpOnly cookies - use cookies for production"
+        "note": "OTP verified successfully. Tokens are set in httpOnly cookies."
     }
 
 @api_router.post("/auth/forgot-password")

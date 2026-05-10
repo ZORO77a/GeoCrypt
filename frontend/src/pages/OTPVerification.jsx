@@ -30,7 +30,6 @@ function OTPVerification() {
     }
   }, [username, role, debug_otp, navigate]);
 
-  // OTP Timer
   useEffect(() => {
     if (otpTimer <= 0) {
       toast.error('OTP has expired. Please request a new one.');
@@ -96,7 +95,6 @@ function OTPVerification() {
       localStorage.setItem('role', role);
 
       toast.success('Login successful!');
-      
       if (role === 'admin') {
         navigate('/admin/dashboard');
       } else {
@@ -122,7 +120,6 @@ function OTPVerification() {
       toast.success('OTP resent to your email');
       setResendCooldown(30);
       setResendNotified(true);
-      // Decrement cooldown
       const interval = setInterval(() => {
         setResendCooldown((prev) => {
           if (prev <= 1) {
@@ -174,9 +171,9 @@ function OTPVerification() {
             ))}
           </div>
 
-          <button 
-            type="submit" 
-            className="submit-btn" 
+          <button
+            type="submit"
+            className="submit-btn"
             disabled={loading || otpTimer <= 0}
             data-testid="verify-otp-btn"
           >
@@ -185,8 +182,8 @@ function OTPVerification() {
         </form>
 
         <div className="login-footer">
-          <p style={{ 
-            color: otpTimer <= 60 ? '#dc2626' : '#6b7280', 
+          <p style={{
+            color: otpTimer <= 60 ? '#dc2626' : '#6b7280',
             fontSize: '14px',
             fontWeight: otpTimer <= 60 ? 'bold' : 'normal'
           }}>

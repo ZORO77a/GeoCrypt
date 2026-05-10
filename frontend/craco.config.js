@@ -26,6 +26,7 @@ const config = {
   disableHotReload: process.env.DISABLE_HOT_RELOAD === "true",
   enableVisualEdits: process.env.REACT_APP_ENABLE_VISUAL_EDITS === "true",
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
+  disableESLint: process.env.DISABLE_ESLINT === "true", // Add this
 };
 
 // Conditionally load visual editing modules only if enabled
@@ -54,6 +55,19 @@ const webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+
+      // Disable ESLint if configured
+      if (config.disableESLint) {
+        webpackConfig.module.rules = webpackConfig.module.rules.filter(rule => {
+          if (rule.use) {
+            return !rule.use.some(use => 
+              (typeof use === 'string' && use.includes('eslint')) ||
+              (typeof use === 'object' && use.loader && use.loader.includes('eslint'))
+            );
+          }
+          return true;
+        });
+      }
 
       // Disable hot reload completely if environment variable is set
       if (config.disableHotReload) {
