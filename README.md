@@ -177,15 +177,21 @@ Download → Validate Access → Decrypt → Send to User
 - Enable HTTPS in production
 - Rotate encryption keys periodically
 
-## Gmail SMTP Setup
+## SMTP Setup
 
-1. Enable 2-Step Verification: https://myaccount.google.com/security
-2. Generate App Password: https://myaccount.google.com/apppasswords
-3. Add to `/app/backend/.env`:
+1. Configure your SMTP provider settings.
+2. Add the values to `backend/.env`:
 ```env
-GMAIL_USER="your-email@gmail.com"
-GMAIL_APP_PASSWORD="your-16-char-password"
+OTP_DELIVERY_MODE=smtp
+SMTP_HOST="smtp.example.com"
+SMTP_PORT=587
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+SMTP_USER="your-smtp-username"
+SMTP_PASS="your-smtp-password"
+SMTP_FROM="noreply@example.com"
 ```
+3. If you only want local OTP logging during development, set `OTP_DELIVERY_MODE=console`.
 
 ## Project Structure
 

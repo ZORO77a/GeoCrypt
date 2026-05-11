@@ -219,6 +219,19 @@ async def lifespan(app: FastAPI):
 # Create the main app with lifespan
 app = FastAPI(title="GeoCrypt API", lifespan=lifespan)
 
+# Add CORS middleware IMMEDIATELY after app creation
+# This ensures CORS preflight OPTIONS requests are handled before any route handlers
+cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
+cors_origins = [origin.strip() for origin in cors_origins]  # Clean whitespace
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=cors_origins,  # Restricted to specific origins
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+)
+
 # Create API router
 api_router = APIRouter(prefix="/api")
 
@@ -269,6 +282,7 @@ def _parse_iso_to_utc(s: Optional[str]) -> Optional[datetime]:
     return dt
 
 # Auth Routes
+
 @api_router.post("/auth/login")
 async def login(request: LoginRequest, response: Response, background_tasks: BackgroundTasks):
     # Rate limiting check
@@ -1384,32 +1398,30 @@ async def get_wfh_status(current_user: dict = Depends(get_current_user)):
     
     return request
 
-# Include router FIRST
+# Include router
 app.include_router(api_router)
 
-# Add CORS middleware AFTER router - FastAPI middleware stack is processed in reverse order
-# So last added = first applied
-# Get allowed origins from environment, default to localhost:3000
-cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
-cors_origins = [origin.strip() for origin in cors_origins]  # Clean whitespace
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=cors_origins,  # Restricted to specific origins
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Explicit methods only
-    allow_headers=["Content-Type", "Authorization"],  # Explicit headers only
-)
+# Global exception handler
+from fastapi.responses import JSONResponse
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 # IP-based rate limiting middleware
 @app.middleware("http")
 async def ip_rate_limit_middleware(request, call_next):
     """Apply rate limiting per IP address"""
+    # Skip rate limiting for CORS preflight OPTIONS requests
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    
     client_ip = get_client_ip(request)
     
     # Check rate limit
     if not check_ip_rate_limit(client_ip):
-        return HTTPException(status_code=429, detail="Too many requests from your IP. Please try again later.")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=429, content={"detail": "Too many requests from your IP. Please try again later."})
     
     response = await call_next(request)
     return response
@@ -1431,10 +1443,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
 
 if __name__ == "__main__":
     import uvicorn

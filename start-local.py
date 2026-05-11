@@ -10,6 +10,7 @@ import time
 import os
 import platform
 import shutil
+import socket
 
 # Colors for output
 class Colors:
@@ -18,6 +19,18 @@ class Colors:
     RED = '\033[0;31m'
     YELLOW = '\033[0;33m'
     NC = '\033[0m'  # No Color
+
+def get_local_ip():
+    """Get the local IP address for network access"""
+    try:
+        # Create a socket to get the local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # Connect to Google DNS
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "localhost"
 
 def print_header(text):
     print(f"{Colors.BLUE}{'='*50}{Colors.NC}")
@@ -202,6 +215,10 @@ def start_services():
     """Start both backend and frontend services"""
     print_header("Starting Services")
     
+    # Get local IP for network access
+    local_ip = get_local_ip()
+    print_info(f"Local IP detected: {local_ip}")
+    
     # Check and free ports first
     check_and_free_ports()
     
@@ -210,9 +227,14 @@ def start_services():
     backend_path = os.path.join(os.getcwd(), 'backend')
     venv_python = os.path.join(backend_path, 'venv', 'bin', 'python')
     
+    # Set CORS_ORIGINS to allow both localhost and network access
+    backend_env = os.environ.copy()
+    backend_env['CORS_ORIGINS'] = f'http://localhost:3000,http://{local_ip}:3000'
+    
     backend_process = subprocess.Popen(
         [venv_python, 'server.py'],
-        cwd=backend_path
+        cwd=backend_path,
+        env=backend_env
     )
     print_success(f"Backend process started (PID: {backend_process.pid})")
     
@@ -222,17 +244,30 @@ def start_services():
     # Frontend process
     print_info("Starting frontend server...")
     frontend_path = os.path.join(os.getcwd(), 'frontend')
+    
+    # Update frontend .env for network access
+    env_file = os.path.join(frontend_path, '.env')
+    with open(env_file, 'r') as f:
+        env_content = f.read()
+    env_content = env_content.replace('REACT_APP_BACKEND_URL=http://localhost:8000', f'REACT_APP_BACKEND_URL=http://{local_ip}:8000')
+    with open(env_file, 'w') as f:
+        f.write(env_content)
+    
+    frontend_env = os.environ.copy()
+    frontend_env['HOST'] = '0.0.0.0'
+    frontend_env['BROWSER'] = 'none'
+    
     frontend_process = subprocess.Popen(
         ['npm', 'start'],
         cwd=frontend_path,
-        env={**os.environ, 'BROWSER': 'none'}  # Don't auto-open browser
+        env=frontend_env
     )
     print_success(f"Frontend process started (PID: {frontend_process.pid})")
     
     print()
     return backend_process, frontend_process
 
-def print_startup_info():
+def print_startup_info(local_ip):
     """Print startup information"""
     print_header("Startup Complete")
     
@@ -240,6 +275,10 @@ def print_startup_info():
     print_success("API Docs:      http://localhost:8000/docs")
     print_success("Frontend:      http://localhost:3000")
     print()
+    if local_ip != "localhost":
+        print_success(f"Network Backend: http://{local_ip}:8000")
+        print_success(f"Network Frontend: http://{local_ip}:3000")
+        print()
     
     print(f"{Colors.BLUE}Default Login Credentials:{Colors.NC}")
     print(f"{Colors.BLUE}  Username: admin{Colors.NC}")
@@ -272,8 +311,11 @@ def main():
     # Start services
     backend_process, frontend_process = start_services()
     
+    # Get local IP for display
+    local_ip = get_local_ip()
+    
     # Print startup info
-    print_startup_info()
+    print_startup_info(local_ip)
     
     # Keep processes running
     try:

@@ -12,20 +12,38 @@ async def send_otp_email(to_email: str, otp: str, username: str):
     Send OTP via configurable SMTP. Supports local dev fallback to console.
     """
     # Core email content
-    smtp_user = os.environ.get("SMTP_USER") or os.environ.get("GMAIL_USER")
-    smtp_password = (os.environ.get("SMTP_PASS") or os.environ.get("GMAIL_APP_PASSWORD", "")).replace(" ", "")
-    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "").strip() or os.environ.get("GMAIL_USER", "").strip()
+    smtp_pass = os.environ.get("SMTP_PASS", "").replace(" ", "")
+    gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD", "").replace(" ", "")
+    smtp_password = smtp_pass or gmail_app_password
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port = int(os.environ.get("SMTP_PORT", "587")) if os.environ.get("SMTP_PORT") else 0
     smtp_use_starttls = os.environ.get("SMTP_USE_TLS", "true").lower() in ("1", "true", "yes")
     smtp_use_ssl = os.environ.get("SMTP_USE_SSL", "false").lower() in ("1", "true", "yes")
 
-    otp_delivery_mode = os.environ.get("OTP_DELIVERY_MODE", "both").lower()
+    password_candidates = []
+    if smtp_pass:
+        password_candidates.append(smtp_pass)
+    if gmail_app_password and gmail_app_password != smtp_pass:
+        password_candidates.append(gmail_app_password)
 
-    if otp_delivery_mode not in ("smtp", "console", "both"):
-        otp_delivery_mode = "both"
+    if not smtp_host and os.environ.get("GMAIL_USER"):
+        smtp_host = "smtp.gmail.com"
+        if smtp_port == 0:
+            smtp_port = 587
 
-    if otp_delivery_mode == "console" or not smtp_user or not smtp_password:
+    otp_delivery_mode = os.environ.get("OTP_DELIVERY_MODE", "smtp").lower()
+
+    if otp_delivery_mode not in ("smtp", "console"):
+        otp_delivery_mode = "smtp"
+
+    if otp_delivery_mode == "console":
         logger.warning(f"OTP_CONSOLE: {otp} for {username} -> {to_email} (smtp skipped)")
+        return True
+
+    if not smtp_user or not smtp_password or not smtp_host or smtp_port == 0:
+        logger.error("SMTP configuration incomplete. Please set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS.")
+        logger.warning(f"FALLBACK - OTP for '{username}' ({to_email}): {otp}")
         return True
 
     smtp_from = os.environ.get("SMTP_FROM", smtp_user)
@@ -74,14 +92,14 @@ async def send_otp_email(to_email: str, otp: str, username: str):
             if fallback not in candidates:
                 candidates.append(fallback)
 
-    async def do_send(host, p, use_tls=False, start_tls=False):
+    async def do_send(host, p, use_tls=False, start_tls=False, password=None):
         await asyncio.wait_for(
             aiosmtplib.send(
                 msg,
                 hostname=host,
                 port=p,
                 username=smtp_user,
-                password=smtp_password,
+                password=password,
                 timeout=30.0,
                 use_tls=use_tls,
                 start_tls=start_tls,
@@ -90,14 +108,15 @@ async def send_otp_email(to_email: str, otp: str, username: str):
         )
 
     for host, port, use_tls, start_tls in candidates:
-        try:
-            logger.info(f"Attempting OTP SMTP send via {host}:{port} (use_tls={use_tls}, start_tls={start_tls})")
-            await do_send(host, port, use_tls=use_tls, start_tls=start_tls)
-            logger.info(f"OTP email sent successfully to {to_email} via {host}:{port}")
-            return True
-        except Exception as e:
-            last_error = e
-            logger.warning(f"OTP send failed via {host}:{port} ({type(e).__name__}: {e})", exc_info=True)
+        for password in password_candidates:
+            try:
+                logger.info(f"Attempting OTP SMTP send via {host}:{port} (use_tls={use_tls}, start_tls={start_tls})")
+                await do_send(host, port, use_tls=use_tls, start_tls=start_tls, password=password)
+                logger.info(f"OTP email sent successfully to {to_email} via {host}:{port}")
+                return True
+            except Exception as e:
+                last_error = e
+                logger.warning(f"OTP send failed via {host}:{port} ({type(e).__name__}: {e})", exc_info=True)
 
     logger.error("All OTP SMTP modes failed; falling back to console logging", exc_info=True)
     logger.warning("════════════════════════════════════════")
